@@ -1,0 +1,201 @@
+<div class="icmp-page wide">
+  <a mat-button routerLink="../../queue" class="back">
+    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+    Work queue
+  </a>
+
+  <icmp-load-state [loading]="store.loading() && !store.claim()" [error]="store.error()" (retry)="store.load(id())" />
+
+  @if (store.claim(); as c) {
+    <header class="head">
+      <div class="title">
+        <span class="eyebrow">{{ c.claimType | enumLabel }} · {{ marketNames[c.market] }} · policy {{ c.policyNumber }}</span>
+        <h1>{{ c.claimNumber }}</h1>
+        <div class="chips">
+          <icmp-status-chip [status]="c.status" />
+          @if (c.priority) {
+            <icmp-priority-chip [priority]="c.priority" />
+          }
+          @if (c.overdue) {
+            <span class="overdue"><span class="material-symbols-outlined" aria-hidden="true">schedule</span>SLA overdue {{ c.slaDueAt | relativeTime }}</span>
+          } @else if (c.slaDueAt && !c.closedAt) {
+            <span class="icmp-muted">SLA due {{ c.slaDueAt | relativeTime }}</span>
+          }
+        </div>
+      </div>
+      <dl class="figures">
+        <div>
+          <dt>Reserve</dt>
+          <dd class="icmp-num">{{ c.reserveAmount | money: c.currency }}</dd>
+        </div>
+        <div>
+          <dt>Estimated loss</dt>
+          <dd class="icmp-num">{{ c.estimatedLoss | money: c.currency }}</dd>
+        </div>
+        <div>
+          <dt>Officer</dt>
+          <dd>{{ c.assignedOfficerName ?? 'Unassigned' }}</dd>
+        </div>
+      </dl>
+    </header>
+
+    @if (store.notice()) {
+      <div class="icmp-banner" data-tone="success" role="status">
+        <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+        <p>{{ store.notice() }}</p>
+      </div>
+    }
+    @if (store.actionError()) {
+      <div class="icmp-banner" data-tone="danger" role="alert">
+        <span class="material-symbols-outlined" aria-hidden="true">error</span>
+        <p>{{ store.actionError() }}</p>
+      </div>
+    }
+
+    <div class="layout">
+      <div class="col icmp-grid">
+        <section class="icmp-card" aria-labelledby="incident-title">
+          <h2 id="incident-title">Incident</h2>
+          <dl class="icmp-kv">
+            <dt>Claimant</dt>
+            <dd>{{ c.claimantName }}</dd>
+            <dt>Date</dt>
+            <dd>{{ c.incidentDate | date: 'd MMMM y' }} <span class="icmp-muted">(reported {{ c.submittedAt | date: 'd MMM, HH:mm' }})</span></dd>
+            <dt>Location</dt>
+            <dd>{{ c.incidentLocation }}</dd>
+            <dt>Insured item</dt>
+            <dd>{{ c.insuredItem }}</dd>
+            <dt>Injury</dt>
+            <dd>
+              @if (c.injuryReported) {
+                <strong class="injury">Yes, injury reported</strong>
+              } @else {
+                No
+              }
+            </dd>
+            <dt>Description</dt>
+            <dd class="desc">{{ c.description }}</dd>
+          </dl>
+        </section>
+
+        <section class="icmp-card" aria-labelledby="cover-title">
+          <h2 id="cover-title">Cover at time of report</h2>
+          <dl class="icmp-kv">
+            <dt>Remaining sum insured</dt>
+            <dd class="icmp-num">{{ c.sumInsured | money: c.currency }}</dd>
+            <dt>Deductible</dt>
+            <dd class="icmp-num">{{ c.deductible | money: c.currency }}</dd>
+            <dt>Maximum payable</dt>
+            <dd class="icmp-num">{{ c.maxPayable | money: c.currency }}</dd>
+            <dt>Estimate in USD</dt>
+            <dd class="icmp-num">{{ c.estimatedLossUsd | money: 'USD' }}</dd>
+          </dl>
+        </section>
+
+        @if (c.infoRequests.length > 0) {
+          <section class="icmp-card" aria-labelledby="info-title">
+            <h2 id="info-title">Questions to the claimant</h2>
+            @for (r of c.infoRequests; track r.id) {
+              <div class="qa">
+                <p class="q">{{ r.question }}</p>
+                @switch (r.status) {
+                  @case ('OPEN') {
+                    <p class="waiting"><span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span>Waiting for the claimant since {{ r.requestedAt | date: 'd MMM' }}</p>
+                  }
+                  @case ('ANSWERED') {
+                    <p class="a">{{ r.response }} <span class="icmp-muted">· {{ r.respondedAt | date: 'd MMM, HH:mm' }}</span></p>
+                  }
+                  @default {
+                    <p class="icmp-muted">Cancelled</p>
+                  }
+                }
+              </div>
+            }
+          </section>
+        }
+
+        @if (c.assessments && c.assessments.length > 0) {
+          <section class="icmp-card" aria-labelledby="assess-title">
+            <h2 id="assess-title">Assessments</h2>
+            @for (a of c.assessments; track a.id; let last = $last) {
+              <div class="assessment" [class.latest]="last">
+                <div class="arow">
+                  <strong>{{ a.liability | enumLabel }}</strong>
+                  <span class="icmp-num">Recommended {{ a.recommendedAmount | money: c.currency }} · reserve {{ a.reserveAmount | money: c.currency }}</span>
+                </div>
+                <p>{{ a.findings }}</p>
+                <p class="icmp-muted small">{{ a.assessorName }} · {{ a.assessedAt | date: 'd MMM y, HH:mm' }}</p>
+              </div>
+            }
+          </section>
+        }
+
+        @if (c.status === 'REJECTED' || c.status === 'SETTLED' || c.status === 'WITHDRAWN') {
+          <section class="icmp-card" aria-labelledby="outcome-title">
+            <h2 id="outcome-title">Outcome</h2>
+            <dl class="icmp-kv">
+              @if (c.status === 'SETTLED') {
+                <dt>Paid</dt>
+                <dd class="icmp-num">{{ c.paidAmount | money: c.currency }}</dd>
+                <dt>Reference</dt>
+                <dd>{{ c.paymentReference }}</dd>
+              }
+              @if (c.status === 'REJECTED') {
+                <dt>Reason</dt>
+                <dd>{{ c.rejectionReason }}</dd>
+              }
+              @if (c.decisionNote) {
+                <dt>Note</dt>
+                <dd>{{ c.decisionNote }}</dd>
+              }
+              <dt>Closed</dt>
+              <dd>{{ c.closedAt | date: 'd MMM y, HH:mm' }}</dd>
+            </dl>
+          </section>
+        }
+      </div>
+
+      <div class="col icmp-grid">
+        <section class="icmp-card actions" aria-labelledby="actions-title">
+          <h2 id="actions-title">Actions</h2>
+          <staff-action-panel
+            [claim]="c"
+            [canHandle]="store.canHandle()"
+            [isManager]="auth.isManager()"
+            [staff]="store.staff()"
+            [busy]="store.busy()"
+            (assign)="store.assign($event)"
+            (requestInfo)="store.requestInfo($event)"
+            (assess)="store.assess($event)"
+            (approve)="store.approve($event)"
+            (settle)="store.settle($event)"
+            (reject)="store.reject($event.reason, $event.explanation)"
+          />
+        </section>
+
+        <section class="icmp-card" aria-labelledby="notes-title">
+          <h2 id="notes-title">Internal notes <span class="icmp-muted count">({{ store.notes().length }})</span></h2>
+          <p class="icmp-muted small">Visible to claims staff only.</p>
+          <mat-form-field class="note-input">
+            <mat-label>Add a note</mat-label>
+            <textarea matInput id="note" rows="2" [ngModel]="noteText()" (ngModelChange)="noteText.set($event)"></textarea>
+          </mat-form-field>
+          <button mat-stroked-button type="button" (click)="saveNote()" [disabled]="!noteText().trim() || store.busy() === 'note'">Save note</button>
+          <ul class="notes">
+            @for (n of store.notes(); track n.id) {
+              <li>
+                <p>{{ n.body }}</p>
+                <span class="icmp-muted small">{{ n.authorName }} · {{ n.createdAt | date: 'd MMM, HH:mm' }}</span>
+              </li>
+            }
+          </ul>
+        </section>
+
+        <section class="icmp-card" aria-labelledby="history-title">
+          <h2 id="history-title">History</h2>
+          <icmp-timeline [entries]="store.timeline()" />
+        </section>
+      </div>
+    </div>
+  }
+</div>

@@ -1,0 +1,76 @@
+<div class="icmp-page">
+  <icmp-page-header title="My claims" subtitle="Track every claim you have reported and respond when we need something from you.">
+    <a mat-flat-button routerLink="new">
+      <span class="material-symbols-outlined" aria-hidden="true">add</span>
+      Report an incident
+    </a>
+  </icmp-page-header>
+
+  @if (store.needsAction().length > 0) {
+    <div class="icmp-banner action" data-tone="warning" role="status">
+      <span class="material-symbols-outlined" aria-hidden="true">assignment_late</span>
+      <div>
+        <strong>We need information from you</strong>
+        <p>
+          @for (c of store.needsAction(); track c.id; let last = $last) {
+            <a [routerLink]="c.id">{{ c.claimNumber }}</a>{{ last ? '' : ', ' }}
+          }
+          — open the claim to answer your claims officer.
+        </p>
+      </div>
+    </div>
+  }
+
+  <mat-button-toggle-group
+    class="filters"
+    aria-label="Filter claims"
+    [value]="store.filter()"
+    (change)="store.setFilter($event.value)"
+    hideSingleSelectionIndicator
+  >
+    @for (f of filters; track f.value) {
+      <mat-button-toggle [value]="f.value">{{ f.label }} ({{ store.counts()[f.value] }})</mat-button-toggle>
+    }
+  </mat-button-toggle-group>
+
+  <icmp-load-state
+    [loading]="store.loading()"
+    [error]="store.error()"
+    [empty]="store.claims().length === 0"
+    emptyIcon="folder_open"
+    [emptyMessage]="store.filter() === 'ALL' ? 'You have not reported any claims yet.' : 'No claims match this filter.'"
+    (retry)="store.load()"
+  >
+    @if (store.filter() === 'ALL') {
+      <a mat-stroked-button routerLink="new">Report your first incident</a>
+    }
+  </icmp-load-state>
+
+  @if (!store.loading() && !store.error()) {
+    <ul class="claims" aria-label="Claims">
+      @for (c of store.claims(); track c.id) {
+        <li>
+          <a class="claim icmp-card" [routerLink]="c.id">
+            <div class="top">
+              <span class="number">{{ c.claimNumber }}</span>
+              <icmp-status-chip [status]="c.status" />
+            </div>
+            <div class="what">
+              <span class="material-symbols-outlined" aria-hidden="true">{{
+                c.claimType === 'MOTOR' ? 'directions_car' : 'home'
+              }}</span>
+              <span>{{ c.claimType | enumLabel }} · policy {{ c.policyNumber }}</span>
+            </div>
+            <p class="hint">{{ meta[c.status].claimantHint }}</p>
+            <dl class="facts">
+              <div><dt>Incident</dt><dd>{{ c.incidentDate | date: 'd MMM y' }}</dd></div>
+              <div><dt>Estimated loss</dt><dd class="icmp-num">{{ c.estimatedLoss | money: c.currency }}</dd></div>
+              <div><dt>Officer</dt><dd>{{ c.assignedOfficerName ?? 'Not yet assigned' }}</dd></div>
+              <div><dt>Updated</dt><dd>{{ c.updatedAt | date: 'd MMM, HH:mm' }}</dd></div>
+            </dl>
+          </a>
+        </li>
+      }
+    </ul>
+  }
+</div>

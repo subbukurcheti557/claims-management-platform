@@ -1,0 +1,198 @@
+<div class="icmp-page">
+  <a mat-button routerLink=".." class="back">
+    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+    My claims
+  </a>
+
+  <icmp-load-state [loading]="store.loading() && !store.claim()" [error]="store.error()" (retry)="store.load(id())" />
+
+  @if (store.claim(); as c) {
+    @if (submitted()) {
+      <div class="icmp-banner submitted" data-tone="success" role="status">
+        <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+        <div>
+          <strong>Claim {{ c.claimNumber }} submitted</strong>
+          <p>Your cover was confirmed. We will notify you here as your claim moves forward.</p>
+        </div>
+      </div>
+    }
+
+    <header class="head">
+      <div>
+        <span class="eyebrow">{{ c.claimType | enumLabel }} claim · policy {{ c.policyNumber }}</span>
+        <h1>{{ c.claimNumber }}</h1>
+      </div>
+      <icmp-status-chip [status]="c.status" />
+    </header>
+
+    <!-- Progress tracker -->
+    @if (c.status !== 'WITHDRAWN') {
+      <ol class="tracker" aria-label="Claim progress">
+        @for (step of steps; track step.status; let i = $index) {
+          <li
+            [class.done]="i < current()"
+            [class.current]="i === current()"
+            [class.rejected]="i === 3 && c.status === 'REJECTED'"
+            [attr.aria-current]="i === current() ? 'step' : null"
+          >
+            <span class="bullet" aria-hidden="true">
+              @if (i < current()) {
+                <span class="material-symbols-outlined">check</span>
+              } @else {
+                {{ i + 1 }}
+              }
+            </span>
+            <span class="slabel">{{ i === 3 ? decisionLabel() : step.label }}</span>
+          </li>
+        }
+      </ol>
+    }
+    <p class="hint">{{ meta[c.status].claimantHint }}</p>
+
+    <!-- Decisions -->
+    @switch (c.status) {
+      @case ('APPROVED') {
+        <div class="icmp-banner" data-tone="success">
+          <span class="material-symbols-outlined" aria-hidden="true">thumb_up</span>
+          <div>
+            <strong>Approved for {{ c.approvedAmount | money: c.currency }}</strong>
+            <p>Payment is being arranged and usually arrives within 3 working days.</p>
+          </div>
+        </div>
+      }
+      @case ('SETTLED') {
+        <div class="icmp-banner" data-tone="success">
+          <span class="material-symbols-outlined" aria-hidden="true">paid</span>
+          <div>
+            <strong>We paid {{ c.paidAmount | money: c.currency }}</strong>
+            <p>Payment reference {{ c.paymentReference }} · {{ c.closedAt | date: 'd MMM y' }}</p>
+          </div>
+        </div>
+      }
+      @case ('REJECTED') {
+        <div class="icmp-banner" data-tone="danger">
+          <span class="material-symbols-outlined" aria-hidden="true">block</span>
+          <div>
+            <strong>{{ c.rejectionReason }}</strong>
+            <p>{{ c.decisionNote }}</p>
+            <p class="small">If you disagree with this decision, reply to your claims officer or contact us to request a review.</p>
+          </div>
+        </div>
+      }
+    }
+
+    @if (store.actionError()) {
+      <div class="icmp-banner" data-tone="danger" role="alert">
+        <span class="material-symbols-outlined" aria-hidden="true">error</span>
+        <p>{{ store.actionError() }}</p>
+      </div>
+    }
+
+    <div class="layout">
+      <div class="main icmp-grid">
+        <!-- Open information requests -->
+        @if (store.openRequests().length > 0) {
+          <section class="icmp-card requests" aria-labelledby="req-title">
+            <h2 id="req-title">
+              <span class="material-symbols-outlined" aria-hidden="true">assignment_late</span>
+              Your claims officer needs information
+            </h2>
+            @for (r of store.openRequests(); track r.id) {
+              <div class="request">
+                <p class="question">{{ r.question }}</p>
+                <p class="icmp-muted meta">{{ r.requestedByName }} · {{ r.requestedAt | date: 'd MMM, HH:mm' }}</p>
+                <mat-form-field class="answer">
+                  <mat-label>Your answer</mat-label>
+                  <textarea
+                    matInput
+                    [id]="'answer-' + r.id"
+                    rows="3"
+                    [ngModel]="answers()[r.id] ?? ''"
+                    (ngModelChange)="setAnswer(r.id, $event)"
+                  ></textarea>
+                </mat-form-field>
+                <button
+                  mat-flat-button
+                  type="button"
+                  (click)="sendAnswer(r.id)"
+                  [disabled]="!(answers()[r.id] ?? '').trim() || store.busy() !== null"
+                >
+                  @if (store.busy() === r.id) {
+                    <mat-spinner diameter="18" aria-label="Sending" />
+                  } @else {
+                    Send answer
+                  }
+                </button>
+              </div>
+            }
+          </section>
+        }
+
+        <section class="icmp-card" aria-labelledby="details-title">
+          <h2 id="details-title">What you reported</h2>
+          <dl class="icmp-kv">
+            <dt>Incident date</dt>
+            <dd>{{ c.incidentDate | date: 'd MMMM y' }}</dd>
+            <dt>Location</dt>
+            <dd>{{ c.incidentLocation }}</dd>
+            <dt>Insured</dt>
+            <dd>{{ c.insuredItem }}</dd>
+            <dt>Description</dt>
+            <dd class="desc">{{ c.description }}</dd>
+            <dt>Injury reported</dt>
+            <dd>{{ c.injuryReported ? 'Yes' : 'No' }}</dd>
+            <dt>Estimated loss</dt>
+            <dd class="icmp-num">{{ c.estimatedLoss | money: c.currency }}</dd>
+            <dt>Claims officer</dt>
+            <dd>{{ c.assignedOfficerName ?? 'Not yet assigned' }}</dd>
+            <dt>Reported</dt>
+            <dd>{{ c.submittedAt | date: 'd MMM y, HH:mm' }}</dd>
+          </dl>
+        </section>
+
+        @if (store.answeredRequests().length > 0) {
+          <section class="icmp-card" aria-labelledby="qa-title">
+            <h2 id="qa-title">Questions and answers</h2>
+            @for (r of store.answeredRequests(); track r.id) {
+              <div class="qa">
+                <p class="question">{{ r.question }}</p>
+                @if (r.status === 'ANSWERED') {
+                  <p class="reply"><span class="icmp-muted">You answered:</span> {{ r.response }}</p>
+                } @else {
+                  <p class="icmp-muted">Cancelled</p>
+                }
+              </div>
+            }
+          </section>
+        }
+
+        @if (store.canWithdraw()) {
+          <section class="icmp-card withdraw" aria-labelledby="wd-title">
+            <h2 id="wd-title">Withdraw this claim</h2>
+            @if (!confirmWithdraw()) {
+              <p class="icmp-muted">If you no longer need us to handle this claim, you can withdraw it.</p>
+              <button mat-stroked-button type="button" (click)="confirmWithdraw.set(true)">Withdraw claim</button>
+            } @else {
+              <p>Withdrawing closes the claim. This cannot be undone.</p>
+              <mat-form-field class="answer">
+                <mat-label>Reason (optional)</mat-label>
+                <input matInput id="withdraw-reason" [ngModel]="withdrawReason()" (ngModelChange)="withdrawReason.set($event)" />
+              </mat-form-field>
+              <div class="icmp-actions-row">
+                <button mat-button type="button" (click)="confirmWithdraw.set(false)">Keep my claim</button>
+                <button mat-flat-button type="button" class="danger" (click)="withdraw()" [disabled]="store.busy() !== null">
+                  Yes, withdraw
+                </button>
+              </div>
+            }
+          </section>
+        }
+      </div>
+
+      <aside class="icmp-card side" aria-labelledby="hist-title">
+        <h2 id="hist-title">History</h2>
+        <icmp-timeline [entries]="store.timeline()" [showActors]="false" />
+      </aside>
+    </div>
+  }
+</div>

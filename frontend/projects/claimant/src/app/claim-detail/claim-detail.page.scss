@@ -1,0 +1,164 @@
+.back {
+  margin: 0 0 12px -8px;
+}
+
+.submitted {
+  margin-bottom: 20px;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+
+  h1 {
+    margin: 2px 0 0;
+    font: 600 1.75rem var(--icmp-font-mono);
+  }
+  .eyebrow {
+    color: var(--icmp-muted);
+    font-size: 0.875rem;
+  }
+}
+
+.tracker {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  list-style: none;
+  margin: 24px 0 8px;
+  padding: 0;
+
+  li {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    text-align: center;
+    color: var(--icmp-muted);
+    font-size: 0.875rem;
+
+    &:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 15px;
+      left: calc(50% + 18px);
+      right: calc(-50% + 18px);
+      height: 2px;
+      background: var(--icmp-line);
+    }
+    &.done::after {
+      background: var(--icmp-accent);
+    }
+  }
+
+  .bullet {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--icmp-line);
+    background: var(--icmp-surface);
+    font-weight: 600;
+    .material-symbols-outlined {
+      font-size: 18px;
+    }
+  }
+  li.done .bullet {
+    background: var(--icmp-accent);
+    border-color: var(--icmp-accent);
+    color: var(--icmp-surface);
+  }
+  li.current {
+    color: var(--icmp-fg);
+    font-weight: 600;
+    .bullet {
+      border-color: var(--icmp-accent);
+      color: var(--icmp-accent);
+    }
+  }
+  li.rejected .bullet {
+    border-color: var(--icmp-tone-danger-fg);
+    color: var(--icmp-tone-danger-fg);
+  }
+}
+
+.hint {
+  margin: 8px 0 20px;
+  text-align: center;
+  color: var(--icmp-muted);
+}
+
+.icmp-banner {
+  margin-bottom: 16px;
+  .small {
+    font-size: 0.8125rem;
+    opacity: 0.85;
+  }
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.requests {
+  border-color: var(--icmp-tone-warning-fg);
+
+  h2 {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--icmp-tone-warning-fg);
+  }
+}
+
+.request + .request {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--icmp-line);
+}
+
+.question {
+  margin: 0;
+  font-weight: 500;
+}
+
+.meta {
+  margin: 2px 0 12px;
+  font-size: 0.8125rem;
+}
+
+.answer {
+  width: 100%;
+}
+
+.desc {
+  white-space: pre-line;
+}
+
+.qa + .qa {
+  margin-top: 12px;
+}
+
+.reply {
+  margin: 4px 0 0;
+}
+
+.withdraw .danger {
+  background: var(--icmp-tone-danger-fg);
+  color: var(--icmp-surface);
+}
+
+@media (max-width: 860px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .tracker .slabel {
+    font-size: 0.75rem;
+  }
+}

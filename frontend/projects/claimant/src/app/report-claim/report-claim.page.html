@@ -1,0 +1,157 @@
+<div class="icmp-page narrow">
+  <icmp-page-header
+    eyebrow="New claim"
+    title="Report an incident"
+    subtitle="Tell us what happened. We check your cover straight away and you can follow progress from My claims."
+  >
+    <a mat-button routerLink="..">Cancel</a>
+  </icmp-page-header>
+
+  <icmp-load-state
+    [loading]="loadingPolicies()"
+    [error]="policyError()"
+    [empty]="!loadingPolicies() && policies().length === 0"
+    emptyIcon="policy"
+    emptyMessage="We could not find any policies in your name."
+    (retry)="loadPolicies()"
+  />
+
+  @if (!loadingPolicies() && policies().length > 0) {
+    <mat-stepper orientation="vertical" [linear]="true" #stepper class="icmp-card stepper">
+      <!-- Step 1: policy -->
+      <mat-step [stepControl]="policyForm" label="Choose the policy">
+        <form [formGroup]="policyForm" class="step">
+          <mat-radio-group formControlName="policyNumber" aria-label="Policy" class="policies">
+            @for (p of activePolicies(); track p.policyNumber) {
+              <mat-radio-button [value]="p.policyNumber" class="policy">
+                <span class="pname">
+                  <span class="material-symbols-outlined" aria-hidden="true">{{
+                    p.product === 'MOTOR' ? 'directions_car' : 'home'
+                  }}</span>
+                  {{ p.product | enumLabel }} · {{ p.policyNumber }}
+                </span>
+                <span class="pitem">{{ p.insuredItem }}</span>
+                <span class="pmeta">Covered to {{ p.endDate | date: 'd MMM y' }} · deductible {{ p.deductible | money: p.currency }}</span>
+              </mat-radio-button>
+            }
+          </mat-radio-group>
+          @if (inactivePolicies().length > 0) {
+            <p class="icmp-muted inactive">
+              Not shown: {{ inactivePolicies().length }} inactive
+              {{ inactivePolicies().length === 1 ? 'policy' : 'policies' }}
+              ({{ inactivePolicies()[0].policyNumber }}{{ inactivePolicies().length > 1 ? ', …' : '' }}).
+            </p>
+          }
+          <div class="icmp-actions-row">
+            <button mat-flat-button matStepperNext type="button" [disabled]="policyForm.invalid">Continue</button>
+          </div>
+        </form>
+      </mat-step>
+
+      <!-- Step 2: incident -->
+      <mat-step [stepControl]="incidentForm" label="What happened">
+        <form [formGroup]="incidentForm" class="step icmp-form">
+          <div class="two">
+            <mat-form-field>
+              <mat-label>Date of the incident</mat-label>
+              <input matInput id="incidentDate" type="date" formControlName="incidentDate" [max]="today" required />
+              @if (incidentForm.controls.incidentDate.hasError('future')) {
+                <mat-error>The date cannot be in the future.</mat-error>
+              } @else if (incidentForm.controls.incidentDate.hasError('required')) {
+                <mat-error>Enter the date it happened.</mat-error>
+              }
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Where did it happen?</mat-label>
+              <input matInput id="incidentLocation" formControlName="incidentLocation" placeholder="e.g. Orchard Road, Singapore" required />
+              @if (incidentForm.controls.incidentLocation.hasError('required')) {
+                <mat-error>Enter the location.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <mat-form-field>
+            <mat-label>Describe what happened</mat-label>
+            <textarea
+              matInput
+              id="description"
+              formControlName="description"
+              rows="5"
+              required
+              placeholder="What happened, what was damaged, and who else was involved."
+            ></textarea>
+            <mat-hint align="end">{{ incidentForm.controls.description.value.length }} / 4000</mat-hint>
+            @if (incidentForm.controls.description.hasError('minlength')) {
+              <mat-error>Please give a little more detail (at least 20 characters).</mat-error>
+            } @else if (incidentForm.controls.description.hasError('required')) {
+              <mat-error>Describe what happened.</mat-error>
+            }
+          </mat-form-field>
+          <mat-checkbox id="injuryReported" formControlName="injuryReported">Someone was injured</mat-checkbox>
+          @if (incidentForm.controls.injuryReported.value) {
+            <p class="icmp-muted note">Claims with injuries are handled with the highest priority.</p>
+          }
+          <div class="icmp-actions-row">
+            <button mat-button matStepperPrevious type="button">Back</button>
+            <button mat-flat-button matStepperNext type="button" [disabled]="incidentForm.invalid">Continue</button>
+          </div>
+        </form>
+      </mat-step>
+
+      <!-- Step 3: loss and review -->
+      <mat-step [stepControl]="lossForm" label="Estimated loss and review">
+        <form [formGroup]="lossForm" class="step icmp-form" (ngSubmit)="submit()">
+          <mat-form-field class="loss">
+            <mat-label>Estimated cost of the damage</mat-label>
+            <span matTextPrefix>{{ selected()?.currency }}&nbsp;</span>
+            <input matInput id="estimatedLoss" type="number" min="0" step="0.01" formControlName="estimatedLoss" required />
+            <mat-hint>A repair quote or your best estimate. The officer will confirm the amount.</mat-hint>
+            @if (lossForm.controls.estimatedLoss.invalid) {
+              <mat-error>Enter an amount greater than zero.</mat-error>
+            }
+          </mat-form-field>
+
+          @if (selected(); as p) {
+            <section class="review" aria-label="Review">
+              <h3>Review</h3>
+              <dl class="icmp-kv">
+                <dt>Policy</dt>
+                <dd>{{ p.policyNumber }} ({{ p.product | enumLabel }})</dd>
+                <dt>Insured</dt>
+                <dd>{{ p.insuredItem }}</dd>
+                <dt>Date</dt>
+                <dd>{{ incidentForm.controls.incidentDate.value | date: 'd MMM y' }}</dd>
+                <dt>Location</dt>
+                <dd>{{ incidentForm.controls.incidentLocation.value }}</dd>
+                <dt>Injury</dt>
+                <dd>{{ incidentForm.controls.injuryReported.value ? 'Yes' : 'No' }}</dd>
+                <dt>Deductible</dt>
+                <dd>{{ p.deductible | money: p.currency }} is paid by you</dd>
+              </dl>
+            </section>
+          }
+
+          @if (submitError()) {
+            <div class="icmp-banner" data-tone="danger" role="alert">
+              <span class="material-symbols-outlined" aria-hidden="true">error</span>
+              <div>
+                <strong>We could not accept this claim</strong>
+                <p>{{ submitError() }}</p>
+              </div>
+            </div>
+          }
+
+          <div class="icmp-actions-row">
+            <button mat-button matStepperPrevious type="button">Back</button>
+            <button mat-flat-button type="submit" [disabled]="lossForm.invalid || submitting()">
+              @if (submitting()) {
+                <mat-spinner diameter="20" aria-label="Submitting" />
+              } @else {
+                Submit claim
+              }
+            </button>
+          </div>
+        </form>
+      </mat-step>
+    </mat-stepper>
+  }
+</div>

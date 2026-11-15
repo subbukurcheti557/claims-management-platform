@@ -1,0 +1,165 @@
+@let c = claim();
+
+<!-- Assignment -->
+@if (allowed().has('ASSIGN')) {
+  <section class="block" aria-labelledby="assign-title">
+    <h3 id="assign-title">This claim is waiting to be picked up</h3>
+    @if (isManager()) {
+      <form class="assign" [formGroup]="assignForm" (ngSubmit)="submitAssign()">
+        <mat-form-field>
+          <mat-label>Assign to</mat-label>
+          <mat-select id="assign-officer" formControlName="officerId">
+            <mat-option value="">Me</mat-option>
+            @for (s of assignable(); track s.id) {
+              <mat-option [value]="s.id">{{ s.fullName }} ({{ s.role === 'CLAIMS_MANAGER' ? 'manager' : 'officer' }})</mat-option>
+            }
+          </mat-select>
+        </mat-form-field>
+        <button mat-flat-button type="submit" [disabled]="busy() !== null">Assign</button>
+      </form>
+    } @else {
+      <button mat-flat-button type="button" (click)="assign.emit(undefined)" [disabled]="busy() !== null">
+        <span class="material-symbols-outlined" aria-hidden="true">back_hand</span>
+        Pick up this claim
+      </button>
+    }
+  </section>
+} @else if (allowed().has('REASSIGN') && isManager()) {
+  <section class="block" aria-labelledby="reassign-title">
+    <h3 id="reassign-title">Reassign</h3>
+    <form class="assign" [formGroup]="assignForm" (ngSubmit)="submitAssign()">
+      <mat-form-field>
+        <mat-label>New officer</mat-label>
+        <mat-select id="reassign-officer" formControlName="officerId">
+          @for (s of assignable(); track s.id) {
+            <mat-option [value]="s.id">{{ s.fullName }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+      <button mat-stroked-button type="submit" [disabled]="busy() !== null || !assignForm.controls.officerId.value">
+        Reassign
+      </button>
+    </form>
+  </section>
+}
+
+@if (!canHandle() && !allowed().has('ASSIGN') && tabs().length > 0) {
+  <p class="readonly icmp-muted">
+    <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+    Assigned to {{ c.assignedOfficerName }}. Only they or a claims manager can act on it.
+  </p>
+}
+
+@if (canHandle() && tabs().length > 0) {
+  <section class="block" aria-labelledby="next-title">
+    <h3 id="next-title">Next step</h3>
+    <mat-button-toggle-group
+      class="tabs"
+      [value]="tab()"
+      (change)="tab.set($event.value)"
+      aria-label="Choose an action"
+      hideSingleSelectionIndicator
+    >
+      @for (t of tabs(); track t.value) {
+        <mat-button-toggle [value]="t.value">{{ t.label }}</mat-button-toggle>
+      }
+    </mat-button-toggle-group>
+
+    @switch (tab()) {
+      @case ('requestInfo') {
+        <form class="icmp-form" [formGroup]="infoForm" (ngSubmit)="submitInfo()">
+          <mat-form-field>
+            <mat-label>Question for the claimant</mat-label>
+            <textarea matInput id="info-question" rows="3" formControlName="question" placeholder="e.g. Please send the police report number."></textarea>
+            <mat-hint>The claimant is notified and the claim waits until they answer.</mat-hint>
+          </mat-form-field>
+          <button mat-flat-button type="submit" [disabled]="busy() !== null || infoForm.invalid">Send question</button>
+        </form>
+      }
+      @case ('assess') {
+        <form class="icmp-form" [formGroup]="assessForm" (ngSubmit)="submitAssess()">
+          <mat-form-field>
+            <mat-label>Liability</mat-label>
+            <mat-select id="assess-liability" formControlName="liability" (valueChange)="onLiability($event)">
+              <mat-option value="ACCEPTED">Accepted</mat-option>
+              <mat-option value="PARTIAL">Partially accepted</mat-option>
+              <mat-option value="DENIED">Denied</mat-option>
+            </mat-select>
+          </mat-form-field>
+          <div class="two">
+            <mat-form-field>
+              <mat-label>Recommended payment</mat-label>
+              <span matTextPrefix>{{ c.currency }}&nbsp;</span>
+              <input matInput id="assess-recommended" type="number" min="0" formControlName="recommendedAmount" />
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Reserve</mat-label>
+              <span matTextPrefix>{{ c.currency }}&nbsp;</span>
+              <input matInput id="assess-reserve" type="number" min="0" formControlName="reserveAmount" />
+            </mat-form-field>
+          </div>
+          <p class="hint icmp-muted">Maximum payable after deductible: {{ maxPayableText() }}. The reserve is what counts towards outstanding exposure.</p>
+          <mat-form-field>
+            <mat-label>Findings</mat-label>
+            <textarea matInput id="assess-findings" rows="3" formControlName="findings" placeholder="Evidence reviewed and how the amount was reached."></textarea>
+          </mat-form-field>
+          <button mat-flat-button type="submit" [disabled]="busy() !== null || assessForm.invalid">Record assessment</button>
+        </form>
+      }
+      @case ('approve') {
+        <form class="icmp-form" [formGroup]="approveForm" (ngSubmit)="submitApprove()">
+          <mat-form-field>
+            <mat-label>Amount to approve</mat-label>
+            <span matTextPrefix>{{ c.currency }}&nbsp;</span>
+            <input matInput id="approve-amount" type="number" min="0" formControlName="amount" />
+            <mat-hint>About {{ approveUsd() | money: 'USD' }}</mat-hint>
+          </mat-form-field>
+          @if (overLimit()) {
+            <div class="icmp-banner" data-tone="warning" role="status">
+              <span class="material-symbols-outlined" aria-hidden="true">gpp_maybe</span>
+              <p>This is above your approval limit of USD 25,000. A claims manager needs to approve it.</p>
+            </div>
+          }
+          <button mat-flat-button type="submit" [disabled]="busy() !== null || approveForm.invalid || overLimit()">
+            Approve claim
+          </button>
+        </form>
+      }
+      @case ('settle') {
+        <form class="icmp-form" [formGroup]="settleForm" (ngSubmit)="submitSettle()">
+          <p>Record the payment of <strong>{{ c.approvedAmount | money: c.currency }}</strong> to {{ c.claimantName }}.</p>
+          <mat-form-field>
+            <mat-label>Payment reference</mat-label>
+            <input matInput id="settle-reference" formControlName="paymentReference" placeholder="e.g. PAY-88231" />
+          </mat-form-field>
+          <button mat-flat-button type="submit" [disabled]="busy() !== null || settleForm.invalid">Record payment and close</button>
+        </form>
+      }
+      @case ('reject') {
+        <form class="icmp-form" [formGroup]="rejectForm" (ngSubmit)="submitReject()">
+          <mat-form-field>
+            <mat-label>Reason</mat-label>
+            <mat-select id="reject-reason" formControlName="reason">
+              @for (r of reasons; track r.code) {
+                <mat-option [value]="r.code">{{ r.label }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+          <mat-form-field>
+            <mat-label>Explanation for the claimant</mat-label>
+            <textarea matInput id="reject-explanation" rows="3" formControlName="explanation" placeholder="Explain the decision in plain words, citing the policy section."></textarea>
+            <mat-hint>The claimant sees this text.</mat-hint>
+          </mat-form-field>
+          <button mat-flat-button type="submit" class="danger" [disabled]="busy() !== null || rejectForm.invalid">Reject claim</button>
+        </form>
+      }
+    }
+  </section>
+}
+
+@if (tabs().length === 0 && !allowed().has('ASSIGN') && !allowed().has('REASSIGN')) {
+  <p class="readonly icmp-muted">
+    <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+    This claim is closed. No further actions.
+  </p>
+}

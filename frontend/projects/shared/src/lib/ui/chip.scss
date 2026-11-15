@@ -1,0 +1,36 @@
+:host {
+  display: inline-flex;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px 2px 6px;
+  border-radius: 999px;
+  font: 500 0.8125rem/1.5 var(--icmp-font-body);
+  white-space: nowrap;
+  background: var(--icmp-tone-neutral-bg);
+  color: var(--icmp-tone-neutral-fg);
+
+  .material-symbols-outlined {
+    font-size: 16px;
+  }
+
+  &[data-tone='info'] {
+    background: var(--icmp-tone-info-bg);
+    color: var(--icmp-tone-info-fg);
+  }
+  &[data-tone='warning'] {
+    background: var(--icmp-tone-warning-bg);
+    color: var(--icmp-tone-warning-fg);
+  }
+  &[data-tone='success'] {
+    background: var(--icmp-tone-success-bg);
+    color: var(--icmp-tone-success-fg);
+  }
+  &[data-tone='danger'] {
+    background: var(--icmp-tone-danger-bg);
+    color: var(--icmp-tone-danger-fg);
+  }
+}

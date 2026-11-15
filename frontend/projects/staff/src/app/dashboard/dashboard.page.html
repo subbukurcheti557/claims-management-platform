@@ -1,0 +1,194 @@
+<div class="icmp-page wide">
+  <icmp-page-header
+    eyebrow="Real time"
+    title="Liability exposure and team workload"
+    subtitle="Outstanding = reserves on open claims. Paid = settled payments. Incurred = both. Converted to USD at fixed rates."
+  >
+    <mat-form-field class="market">
+      <mat-label>Market</mat-label>
+      <mat-select id="dash-market" [value]="store.market()" (valueChange)="store.setMarket($event)">
+        <mat-option [value]="undefined">All six markets</mat-option>
+        @for (m of markets; track m) {
+          <mat-option [value]="m">{{ marketNames[m] }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <button mat-stroked-button type="button" (click)="store.load()" aria-label="Refresh figures">
+      <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+      Refresh
+    </button>
+  </icmp-page-header>
+
+  <icmp-load-state [loading]="store.loading() && !store.exposure()" [error]="store.error()" (retry)="store.load()" />
+
+  @if (store.exposure(); as e) {
+    <section class="kpis" aria-label="Key figures">
+      <div class="kpi">
+        <span class="k">Outstanding liability</span>
+        <span class="v icmp-num">{{ e.totals.outstandingUsd | compactMoney }}</span>
+        <span class="s icmp-num">{{ e.totals.outstandingUsd | money: 'USD' }}</span>
+      </div>
+      <div class="kpi">
+        <span class="k">Paid</span>
+        <span class="v icmp-num">{{ e.totals.paidUsd | compactMoney }}</span>
+        <span class="s">{{ e.totals.settledClaims }} settled claims</span>
+      </div>
+      <div class="kpi">
+        <span class="k">Incurred</span>
+        <span class="v icmp-num">{{ e.totals.incurredUsd | compactMoney }}</span>
+        <span class="s">outstanding + paid</span>
+      </div>
+      <div class="kpi">
+        <span class="k">Open claims</span>
+        <span class="v icmp-num">{{ e.totals.openClaims }}</span>
+        <span class="s">{{ store.workload()?.unassignedClaims ?? 0 }} waiting to be picked up</span>
+      </div>
+      <div class="kpi" [class.alert]="e.totals.overdueClaims > 0">
+        <span class="k">Past SLA</span>
+        <span class="v icmp-num">{{ e.totals.overdueClaims }}</span>
+        <span class="s">
+          @if (e.totals.openClaims > 0) {
+            {{ e.totals.overdueClaims / e.totals.openClaims | percent }} of open claims
+          }
+        </span>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="icmp-card span2" aria-labelledby="mkt-title">
+        <h2 id="mkt-title">By market</h2>
+        <div class="legend" aria-hidden="true">
+          <span><i class="sw out"></i>Outstanding</span>
+          <span><i class="sw paid"></i>Paid</span>
+        </div>
+        <div class="icmp-table-wrap flat">
+          <table class="data">
+            <caption class="sr-only">Exposure by market</caption>
+            <thead>
+              <tr>
+                <th scope="col">Market</th>
+                <th scope="col" class="r">Open</th>
+                <th scope="col" class="r">Outstanding (local)</th>
+                <th scope="col" class="r">Outstanding USD</th>
+                <th scope="col" class="r">Paid USD</th>
+                <th scope="col" class="bar-col">Incurred</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (m of e.byMarket; track m.market) {
+                <tr>
+                  <th scope="row"><span class="mkt">{{ m.market }}</span> {{ marketNames[m.market] }}</th>
+                  <td class="r icmp-num">{{ m.openClaims }}</td>
+                  <td class="r icmp-num">{{ m.outstanding | money: m.currency }}</td>
+                  <td class="r icmp-num">{{ m.outstandingUsd | money: 'USD' }}</td>
+                  <td class="r icmp-num">{{ m.paidUsd | money: 'USD' }}</td>
+                  <td class="bar-col">
+                    <div class="stack" [attr.aria-label]="'Incurred ' + (m.incurredUsd | money: 'USD')">
+                      <span class="seg out" [style.width]="pct(m.outstandingUsd, store.maxMarketOutstanding())"></span>
+                      @if (m.paidUsd > 0) {
+                        <span class="seg paid" [style.width]="pct(m.paidUsd, store.maxMarketOutstanding())"></span>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="icmp-card" aria-labelledby="age-title">
+        <h2 id="age-title">Age of open claims</h2>
+        <ul class="bars">
+          @for (a of e.ageing; track a.bucket) {
+            <li>
+              <span class="lbl">{{ a.bucket }}</span>
+              <span class="track"><span class="fill" [style.width]="pct(a.outstandingUsd, store.maxAgeing())"></span></span>
+              <span class="val icmp-num">{{ a.openClaims }} · {{ a.outstandingUsd | compactMoney }}</span>
+            </li>
+          }
+        </ul>
+      </section>
+
+      <section class="icmp-card" aria-labelledby="type-title">
+        <h2 id="type-title">By line of business</h2>
+        <dl class="split">
+          @for (t of e.byClaimType; track t.claimType) {
+            <div>
+              <dt>
+                <span class="material-symbols-outlined" aria-hidden="true">{{ t.claimType === 'MOTOR' ? 'directions_car' : 'home' }}</span>
+                {{ t.claimType | enumLabel }}
+              </dt>
+              <dd>
+                <span class="icmp-num big">{{ t.outstandingUsd | compactMoney }}</span>
+                <span class="icmp-muted">{{ t.openClaims }} open · paid {{ t.paidUsd | compactMoney }}</span>
+              </dd>
+            </div>
+          }
+        </dl>
+        <h3>Outstanding by status</h3>
+        <ul class="statuses">
+          @for (s of store.openStatuses(); track s.status) {
+            <li>
+              <span>{{ s.status | enumLabel }}</span>
+              <span class="icmp-num">{{ s.claims }} · {{ s.outstandingUsd | compactMoney }}</span>
+            </li>
+          }
+        </ul>
+      </section>
+
+      @if (store.workload(); as w) {
+        <section class="icmp-card span2" aria-labelledby="team-title">
+          <h2 id="team-title">Team workload</h2>
+          <p class="icmp-muted sub">
+            {{ w.unassignedClaims }} unassigned ({{ w.unassignedOverdue }} overdue).
+            <a routerLink="../queue">Open the queue</a>
+          </p>
+          <div class="icmp-table-wrap flat">
+            <table class="data">
+              <caption class="sr-only">Workload per officer</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Officer</th>
+                  <th scope="col" class="bar-col">Open claims</th>
+                  <th scope="col" class="r">Overdue</th>
+                  <th scope="col" class="r">High priority</th>
+                  <th scope="col" class="r">Closed 30d</th>
+                  <th scope="col" class="r">Avg days to close</th>
+                  <th scope="col" class="r">Reserves USD</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (o of w.officers; track o.officerId) {
+                  <tr>
+                    <th scope="row">{{ o.officerName }}</th>
+                    <td class="bar-col">
+                      <span class="track inline"><span class="fill" [style.width]="pct(o.openClaims, store.maxOfficerOpen())"></span></span>
+                      <span class="icmp-num">{{ o.openClaims }}</span>
+                    </td>
+                    <td class="r icmp-num" [class.bad]="o.overdueClaims > 0">{{ o.overdueClaims }}</td>
+                    <td class="r icmp-num">{{ o.highPriorityOpen }}</td>
+                    <td class="r icmp-num">{{ o.closedLast30Days }}</td>
+                    <td class="r icmp-num">{{ o.averageDaysToClose ?? '—' }}</td>
+                    <td class="r icmp-num">{{ o.outstandingUsd | money: 'USD' }}</td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="7" class="icmp-muted">No claims have been assigned yet.</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </section>
+      }
+    </div>
+
+    <p class="foot icmp-muted">
+      As of {{ e.asOf | date: 'd MMM y, HH:mm:ss' }}. FX to USD:
+      @for (r of e.fxRatesToUsd | keyvalue; track r.key; let last = $last) {
+        {{ r.key }} {{ r.value }}{{ last ? '' : ' · ' }}
+      }
+    </p>
+  }
+</div>

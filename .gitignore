@@ -19,3 +19,5 @@ playwright-report/
 Thumbs.db
 # Env
 .env
+frontend/test-results/
+frontend/playwright-report/

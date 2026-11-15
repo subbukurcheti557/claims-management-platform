@@ -1,0 +1,201 @@
+<div class="icmp-page wide">
+  <icmp-page-header
+    eyebrow="Claims desk"
+    title="Work queue"
+    subtitle="Oldest SLA first. Pick up new claims, and keep an eye on anything overdue."
+  />
+
+  @if (store.myStats(); as s) {
+    <section class="mine" aria-label="My workload">
+      <div class="tile">
+        <span class="k">My open claims</span>
+        <span class="v icmp-num">{{ s.openClaims }}</span>
+      </div>
+      <div class="tile" [class.alert]="s.overdueClaims > 0">
+        <span class="k">Overdue</span>
+        <span class="v icmp-num">{{ s.overdueClaims }}</span>
+      </div>
+      <div class="tile">
+        <span class="k">High priority</span>
+        <span class="v icmp-num">{{ s.highPriorityOpen }}</span>
+      </div>
+      <div class="tile">
+        <span class="k">Closed in 30 days</span>
+        <span class="v icmp-num">{{ s.closedLast30Days }}</span>
+      </div>
+      <div class="tile">
+        <span class="k">Avg days to close</span>
+        <span class="v icmp-num">{{ s.averageDaysToClose ?? '—' }}</span>
+      </div>
+      <div class="tile">
+        <span class="k">My reserves</span>
+        <span class="v icmp-num">{{ s.outstandingUsd | money: 'USD' }}</span>
+      </div>
+    </section>
+  }
+
+  <mat-tab-group
+    [selectedIndex]="scopeIndex()"
+    (selectedIndexChange)="onTab($event)"
+    animationDuration="0ms"
+    mat-stretch-tabs="false"
+    aria-label="Queue"
+  >
+    @for (s of scopes; track s.value) {
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <span class="material-symbols-outlined tab-icon" aria-hidden="true">{{ s.icon }}</span>
+          {{ s.label }}
+        </ng-template>
+      </mat-tab>
+    }
+  </mat-tab-group>
+
+  <form class="filters" (submit)="$event.preventDefault()" aria-label="Filters">
+    <mat-form-field class="search">
+      <mat-label>Search</mat-label>
+      <span matPrefix class="material-symbols-outlined" aria-hidden="true">search</span>
+      <input
+        matInput
+        id="q"
+        name="q"
+        placeholder="Claim, policy or claimant"
+        [ngModel]="store.filters().q"
+        (keyup.enter)="store.setFilters({ q: $any($event.target).value })"
+        (blur)="store.filters().q !== $any($event.target).value && store.setFilters({ q: $any($event.target).value })"
+      />
+    </mat-form-field>
+    <mat-form-field>
+      <mat-label>Market</mat-label>
+      <mat-select id="market" [value]="store.filters().market" (valueChange)="store.setFilters({ market: $event })">
+        <mat-option [value]="undefined">All markets</mat-option>
+        @for (m of markets; track m) {
+          <mat-option [value]="m">{{ marketNames[m] }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field>
+      <mat-label>Priority</mat-label>
+      <mat-select id="priority" [value]="store.filters().priority" (valueChange)="store.setFilters({ priority: $event })">
+        <mat-option [value]="undefined">Any</mat-option>
+        <mat-option value="HIGH">High</mat-option>
+        <mat-option value="MEDIUM">Medium</mat-option>
+        <mat-option value="LOW">Low</mat-option>
+      </mat-select>
+    </mat-form-field>
+    @if (store.scope() !== 'UNASSIGNED') {
+      <mat-form-field>
+        <mat-label>Status</mat-label>
+        <mat-select id="status" [value]="store.filters().status" (valueChange)="store.setFilters({ status: $event })">
+          <mat-option [value]="undefined">Any</mat-option>
+          @for (st of statuses; track st) {
+            <mat-option [value]="st">{{ st | enumLabel }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+    }
+    <mat-slide-toggle
+      id="overdue"
+      [checked]="store.filters().overdueOnly"
+      (change)="store.setFilters({ overdueOnly: $event.checked })"
+      >Overdue only</mat-slide-toggle
+    >
+    @if (store.hasFilters()) {
+      <button mat-button type="button" (click)="store.clearFilters()">Clear filters</button>
+    }
+  </form>
+
+  @if (store.notice()) {
+    <div class="icmp-banner notice" data-tone="warning" role="status">
+      <span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>
+      <p>{{ store.notice() }}</p>
+    </div>
+  }
+
+  <icmp-load-state
+    [loading]="store.loading()"
+    [error]="store.error()"
+    [empty]="!store.loading() && store.rows().length === 0"
+    emptyIcon="task_alt"
+    [emptyMessage]="store.scope() === 'UNASSIGNED' ? 'Nothing waiting to be picked up.' : 'No claims match.'"
+    (retry)="store.load()"
+  />
+
+  @if (store.rows().length > 0) {
+    <div class="icmp-table-wrap">
+      <table mat-table [dataSource]="store.rows()" matSort (matSortChange)="onSort($event)" aria-label="Claims">
+        <ng-container matColumnDef="claimNumber">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="claimNumber">Claim</th>
+          <td mat-cell *matCellDef="let c">
+            <a class="num" [routerLink]="['..', 'claims', c.id]" (click)="$event.stopPropagation()">{{ c.claimNumber }}</a>
+            <span class="sub">{{ c.claimType | enumLabel }} · {{ c.incidentDate | date: 'd MMM' }}</span>
+          </td>
+        </ng-container>
+        <ng-container matColumnDef="claimant">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="claimantName">Claimant</th>
+          <td mat-cell *matCellDef="let c">{{ c.claimantName }}</td>
+        </ng-container>
+        <ng-container matColumnDef="market">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="market">Market</th>
+          <td mat-cell *matCellDef="let c"><span class="mkt">{{ c.market }}</span></td>
+        </ng-container>
+        <ng-container matColumnDef="status">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="status">Status</th>
+          <td mat-cell *matCellDef="let c"><icmp-status-chip [status]="c.status" /></td>
+        </ng-container>
+        <ng-container matColumnDef="priority">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="priority">Priority</th>
+          <td mat-cell *matCellDef="let c"><icmp-priority-chip [priority]="c.priority" /></td>
+        </ng-container>
+        <ng-container matColumnDef="reserve">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="reserveAmount" class="right">Reserve</th>
+          <td mat-cell *matCellDef="let c" class="right icmp-num">{{ c.reserveAmount | money: c.currency }}</td>
+        </ng-container>
+        <ng-container matColumnDef="slaDueAt">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="slaDueAt">SLA</th>
+          <td mat-cell *matCellDef="let c">
+            @if (c.overdue) {
+              <span class="sla overdue"><span class="material-symbols-outlined" aria-hidden="true">schedule</span>Overdue
+                {{ c.slaDueAt | relativeTime }}</span>
+            } @else if (c.status === 'SETTLED' || c.status === 'REJECTED' || c.status === 'WITHDRAWN') {
+              <span class="icmp-muted">Closed</span>
+            } @else {
+              <span class="sla">Due {{ c.slaDueAt | relativeTime }}</span>
+            }
+          </td>
+        </ng-container>
+        <ng-container matColumnDef="officer">
+          <th mat-header-cell *matHeaderCellDef>Officer</th>
+          <td mat-cell *matCellDef="let c">{{ c.assignedOfficerName ?? '—' }}</td>
+        </ng-container>
+        <ng-container matColumnDef="actions">
+          <th mat-header-cell *matHeaderCellDef><span class="sr-only">Actions</span></th>
+          <td mat-cell *matCellDef="let c" class="right">
+            @if (c.status === 'SUBMITTED' && !c.assignedOfficerId) {
+              <button
+                mat-flat-button
+                type="button"
+                (click)="pickUp($event, c)"
+                [disabled]="store.pickingUp() !== null"
+                [attr.aria-label]="'Pick up ' + c.claimNumber"
+              >
+                {{ store.pickingUp() === c.id ? 'Picking up…' : 'Pick up' }}
+              </button>
+            }
+          </td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="columns"></tr>
+        <tr mat-row *matRowDef="let row; columns: columns" class="row" [class.overdue-row]="row.overdue" (click)="open(row.id)"></tr>
+      </table>
+    </div>
+    <mat-paginator
+      [length]="store.total()"
+      [pageIndex]="store.page()"
+      [pageSize]="store.pageSize()"
+      [pageSizeOptions]="[10, 20, 50]"
+      (page)="onPage($event)"
+      aria-label="Pages"
+    />
+  }
+</div>

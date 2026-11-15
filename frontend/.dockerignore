@@ -1,0 +1,5 @@
+node_modules
+.angular
+coverage
+test-results
+playwright-report

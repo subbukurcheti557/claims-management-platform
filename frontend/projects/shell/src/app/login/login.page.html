@@ -1,0 +1,78 @@
+<div class="login">
+  <section class="intro" aria-labelledby="intro-title">
+    <span class="mark" aria-hidden="true"><span class="material-symbols-outlined">shield</span></span>
+    <h1 id="intro-title">Motor and property claims, from first report to payment.</h1>
+    <p>
+      Policyholders report incidents and follow every step. Claims teams across Singapore, Hong Kong,
+      Australia, Malaysia, Thailand and Indonesia work one queue and see their exposure live.
+    </p>
+    <ul class="markets" aria-label="Markets">
+      @for (m of ['SG', 'HK', 'AU', 'MY', 'TH', 'ID']; track m) {
+        <li>{{ m }}</li>
+      }
+    </ul>
+  </section>
+
+  <section class="panel" aria-labelledby="signin-title">
+    <h2 id="signin-title">Sign in</h2>
+    @if (expired()) {
+      <div class="icmp-banner" data-tone="warning" role="status">
+        <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
+        <p>Your session expired. Please sign in again.</p>
+      </div>
+    }
+    <form class="icmp-form" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      <mat-form-field>
+        <mat-label>Email</mat-label>
+        <input matInput id="email" type="email" formControlName="email" autocomplete="username" required />
+        @if (form.controls.email.hasError('email')) {
+          <mat-error>Enter a valid email address.</mat-error>
+        } @else if (form.controls.email.hasError('required')) {
+          <mat-error>Email is required.</mat-error>
+        }
+      </mat-form-field>
+      <mat-form-field>
+        <mat-label>Password</mat-label>
+        <input
+          matInput
+          id="password"
+          type="password"
+          formControlName="password"
+          autocomplete="current-password"
+          required
+        />
+        @if (form.controls.password.hasError('required')) {
+          <mat-error>Password is required.</mat-error>
+        }
+      </mat-form-field>
+
+      @if (error()) {
+        <div class="icmp-banner" data-tone="danger" role="alert">
+          <span class="material-symbols-outlined" aria-hidden="true">error</span>
+          <p>{{ error() }}</p>
+        </div>
+      }
+
+      <button mat-flat-button type="submit" class="submit" [disabled]="submitting()">
+        @if (submitting()) {
+          <mat-spinner diameter="20" aria-label="Signing in" />
+        } @else {
+          Sign in
+        }
+      </button>
+    </form>
+
+    <div class="demo">
+      <h3>Demo accounts</h3>
+      <p class="icmp-muted">Password for all: <code>{{ demoPassword }}</code></p>
+      <div class="demo-list">
+        @for (a of demoAccounts; track a.email) {
+          <button mat-stroked-button type="button" (click)="useDemo(a)" [disabled]="submitting()">
+            <span class="dname">{{ a.name }}</span>
+            <span class="drole">{{ a.role }}</span>
+          </button>
+        }
+      </div>
+    </div>
+  </section>
+</div>

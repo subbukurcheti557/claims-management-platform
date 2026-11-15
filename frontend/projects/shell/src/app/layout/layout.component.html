@@ -1,0 +1,102 @@
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<mat-toolbar class="topbar">
+  <a class="brand" [routerLink]="auth.homeUrl()" aria-label="Claims home">
+    <span class="mark" aria-hidden="true">
+      <span class="material-symbols-outlined">shield</span>
+    </span>
+    <span class="name">Claims<span class="thin">Hub</span></span>
+  </a>
+
+  <nav class="nav" aria-label="Main">
+    @for (link of links(); track link.path) {
+      <a
+        mat-button
+        [routerLink]="link.path"
+        routerLinkActive="active"
+        [routerLinkActiveOptions]="{ exact: !!link.exact }"
+        ariaCurrentWhenActive="page"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">{{ link.icon }}</span>
+        <span class="label">{{ link.label }}</span>
+      </a>
+    }
+  </nav>
+
+  <span class="spacer"></span>
+
+  <button
+    mat-icon-button
+    type="button"
+    (click)="theme.cycle()"
+    [matTooltip]="'Theme: ' + theme.choice()"
+    [attr.aria-label]="'Change theme, currently ' + theme.choice()"
+  >
+    <span class="material-symbols-outlined">{{ themeIcon() }}</span>
+  </button>
+
+  <button
+    mat-icon-button
+    type="button"
+    [matMenuTriggerFor]="bell"
+    (menuOpened)="notifications.loadList()"
+    [attr.aria-label]="'Notifications, ' + notifications.unread() + ' unread'"
+  >
+    <span
+      class="material-symbols-outlined"
+      [matBadge]="notifications.unread()"
+      [matBadgeHidden]="!notifications.hasUnread()"
+      matBadgeColor="warn"
+      matBadgeSize="small"
+      aria-hidden="true"
+      >notifications</span
+    >
+  </button>
+  <mat-menu #bell="matMenu" xPosition="before" class="bell-menu">
+    <div class="bell-head" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()" role="presentation">
+      <strong>Notifications</strong>
+      @if (notifications.hasUnread()) {
+        <button mat-button type="button" (click)="notifications.markAllRead()">Mark all read</button>
+      }
+    </div>
+    <mat-divider />
+    @if (notifications.items().length === 0) {
+      <p class="bell-empty">{{ notifications.loading() ? 'Loading…' : 'You have no notifications.' }}</p>
+    }
+    @for (item of notifications.items(); track item.id) {
+      <button mat-menu-item type="button" class="bell-item" [class.unread]="!item.read" (click)="open(item)">
+        <span class="material-symbols-outlined cat" [attr.data-cat]="item.category" aria-hidden="true">{{
+          item.category === 'ACTION_REQUIRED' ? 'assignment_late' : item.category === 'DECISION' ? 'gavel' : 'info'
+        }}</span>
+        <span class="text">
+          <span class="title">{{ item.title }}@if (!item.read) {<span class="sr-only"> (unread)</span>}</span>
+          <span class="msg">{{ item.message }}</span>
+          <span class="when">{{ item.claimNumber }} · {{ item.createdAt | date: 'd MMM, HH:mm' }}</span>
+        </span>
+      </button>
+    }
+  </mat-menu>
+
+  <button mat-button type="button" class="user" [matMenuTriggerFor]="userMenu" aria-label="Account menu">
+    <span class="avatar" aria-hidden="true">{{ auth.user()?.fullName?.charAt(0) }}</span>
+    <span class="who">
+      <span class="uname">{{ auth.user()?.fullName }}</span>
+      <span class="urole">{{ roleLabel() }} · {{ auth.user()?.market }}</span>
+    </span>
+  </button>
+  <mat-menu #userMenu="matMenu" xPosition="before">
+    <div class="user-head" role="presentation">
+      <strong>{{ auth.user()?.fullName }}</strong>
+      <span>{{ auth.user()?.email }}</span>
+    </div>
+    <mat-divider />
+    <button mat-menu-item type="button" (click)="logout()">
+      <span class="material-symbols-outlined" aria-hidden="true">logout</span>
+      Sign out
+    </button>
+  </mat-menu>
+</mat-toolbar>
+
+<main id="main" tabindex="-1">
+  <router-outlet />
+</main>

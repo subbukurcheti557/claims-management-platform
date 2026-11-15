@@ -1,0 +1,18 @@
+.fallback {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding-top: 80px;
+  text-align: center;
+
+  .material-symbols-outlined {
+    font-size: 56px;
+    color: var(--icmp-muted);
+  }
+  h1 {
+    margin: 8px 0 0;
+  }
+  p {
+    margin: 0 0 16px;
+  }
+}

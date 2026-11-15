@@ -1,0 +1,156 @@
+.wide {
+  max-width: 1400px;
+}
+
+.back {
+  margin: 0 0 12px -8px;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px 32px;
+  margin-bottom: 20px;
+
+  h1 {
+    margin: 2px 0 8px;
+    font: 600 1.75rem var(--icmp-font-mono);
+  }
+  .eyebrow {
+    color: var(--icmp-muted);
+    font-size: 0.875rem;
+  }
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.overdue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--icmp-tone-danger-fg);
+  font-weight: 500;
+}
+
+.figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin: 0;
+
+  dt {
+    font-size: 0.75rem;
+    color: var(--icmp-muted);
+  }
+  dd {
+    margin: 0;
+    font: 600 1.125rem var(--icmp-font-display);
+  }
+}
+
+.icmp-banner {
+  margin-bottom: 16px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.actions {
+  border-color: var(--icmp-accent);
+}
+
+.injury {
+  color: var(--icmp-tone-danger-fg);
+}
+
+.desc {
+  white-space: pre-line;
+}
+
+.qa + .qa,
+.assessment + .assessment {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--icmp-line);
+}
+
+.q {
+  margin: 0;
+  font-weight: 500;
+}
+
+.a,
+.waiting {
+  margin: 4px 0 0;
+}
+
+.waiting {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--icmp-tone-warning-fg);
+}
+
+.assessment {
+  p {
+    margin: 4px 0 0;
+  }
+  &:not(.latest) {
+    opacity: 0.7;
+  }
+}
+
+.arow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.small {
+  font-size: 0.8125rem;
+}
+
+.count {
+  font-weight: 400;
+}
+
+.note-input {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.notes {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+
+  li {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--icmp-surface-2);
+  }
+  p {
+    margin: 0 0 2px;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
