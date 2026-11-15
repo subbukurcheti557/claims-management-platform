@@ -33,6 +33,18 @@ public class GlobalExceptionHandler {
         return build(ex.getStatus(), ex.getTitle(), ex.getMessage(), null);
     }
 
+    @ExceptionHandler(com.icmp.claims.claim.domain.ClaimRuleException.class)
+    ResponseEntity<ProblemDetail> handleClaimRule(com.icmp.claims.claim.domain.ClaimRuleException ex) {
+        return switch (ex.getKind()) {
+            case INVALID_TRANSITION -> build(HttpStatus.CONFLICT, "Action not allowed in current status",
+                    ex.getMessage(), null);
+            case STALE_VERSION -> build(HttpStatus.CONFLICT, "Concurrent modification", ex.getMessage(), null);
+            case NOT_PERMITTED -> build(HttpStatus.FORBIDDEN, "Not permitted", ex.getMessage(), null);
+            case RULE_VIOLATION -> build(HttpStatus.UNPROCESSABLE_ENTITY, "Business rule violated",
+                    ex.getMessage(), null);
+        };
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ProblemDetail> handleValidation(MethodArgumentNotValidException ex) {
         List<Map<String, String>> errors = ex.getBindingResult().getFieldErrors().stream()
