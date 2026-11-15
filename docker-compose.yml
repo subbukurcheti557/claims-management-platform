@@ -59,7 +59,7 @@ services:
 
   discovery-server:
     <<: *java-service
-    build: ./discovery-server
+    build: ./backend/platform/discovery-server
     container_name: icmp-discovery
     ports:
       - "8761:8761"
@@ -74,7 +74,7 @@ services:
 
   identity-service:
     <<: *java-service
-    build: ./identity-service
+    build: ./backend/services/identity-service
     container_name: icmp-identity
     environment:
       <<: *java-env
@@ -92,7 +92,7 @@ services:
 
   policy-service:
     <<: *java-service
-    build: ./policy-service
+    build: ./backend/services/policy-service
     container_name: icmp-policy
     environment:
       <<: *java-env
@@ -111,7 +111,7 @@ services:
 
   claims-service:
     <<: *java-service
-    build: ./claims-service
+    build: ./backend/services/claims-service
     container_name: icmp-claims
     environment:
       <<: *java-env
@@ -130,7 +130,7 @@ services:
 
   notification-service:
     <<: *java-service
-    build: ./notification-service
+    build: ./backend/services/notification-service
     container_name: icmp-notification
     environment:
       <<: *java-env
@@ -149,7 +149,7 @@ services:
 
   api-gateway:
     <<: *java-service
-    build: ./api-gateway
+    build: ./backend/platform/api-gateway
     container_name: icmp-gateway
     ports:
       - "8080:8080"

@@ -103,6 +103,20 @@ The developer should be able to defend or override each of these:
 
 ---
 
+## Entry 7 — Developer asked for a clearer repository layout
+
+**Developer asked:** before pushing to GitHub, all six services sat next to `frontend/` and `docs/` at the root; I
+wanted the repository grouped as backend / frontend / docs.
+**AI suggested** three options and recommended `backend/platform/` (Eureka, gateway) and `backend/services/`
+(identity, policy, claims, notification), keeping `contracts/`, `infra/`, `scripts/` and `docker-compose.yml` at
+the root because they belong to the whole system. I chose that one.
+**Important point the AI raised:** `backend/` must stay a plain folder with **no parent pom**, otherwise it would bring
+back the multi-module coupling I rejected in entry 2.
+**Done:** `git mv` (history kept), then updated the compose build paths, `build-all.sh`, README and architecture docs.
+Re-verified by rebuilding the images and re-running the smoke test.
+
+---
+
 ## Verification evidence
 
 - Backend: 121 tests pass (gateway 5, identity 9, policy 15, claims 78, notification 14), on real PostgreSQL and

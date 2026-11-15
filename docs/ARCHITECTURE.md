@@ -377,25 +377,29 @@ exposure by market/type table + bar chart, ageing buckets, per-officer workload 
 
 Each service is its own Maven project with its own `pom.xml` (parent: `spring-boot-starter-parent` 3.4.5), its own
 database, Dockerfile and test suite. There is **no parent build and no shared jar**: the services share only REST
-contracts and the event JSON schema. (Changed from the first plan's multi-module build with `platform-commons` and
+contracts and the event JSON schema. `backend/platform` (infrastructure services) and `backend/services` (business
+and identity services) are plain folders for readability; there is no `pom.xml` in them. (Changed from the first plan's multi-module build with `platform-commons` and
 `event-contracts` modules, see the AI journal, entry 2.)
 
 ```
 claims-management-platform/
-├── discovery-server/        Eureka                                   :8761
-├── api-gateway/             Spring Cloud Gateway, JWT, CORS          :8080
-├── identity-service/        users, login, JWT issuance               :8081  identity_db
-├── policy-service/          policies, coverage, paid-to-date         :8082  policy_db
-├── claims-service/          claim lifecycle, queue, dashboards       :8083  claims_db
-├── notification-service/    in-app notifications from events         :8084  notification_db
-├── frontend/                Angular 22 workspace: shell, claimant, staff, shared   :4200 / :4201 / :4202
+├── backend/                     6 independent Spring Boot services (folder only, NO parent pom)
+│   ├── platform/
+│   │   ├── discovery-server/    Eureka                                   :8761
+│   │   └── api-gateway/         Spring Cloud Gateway, JWT, CORS          :8080
+│   └── services/
+│       ├── identity-service/    users, login, JWT issuance               :8081  identity_db
+│       ├── policy-service/      policies, coverage, paid-to-date         :8082  policy_db
+│       ├── claims-service/      claim lifecycle, queue, dashboards       :8083  claims_db
+│       └── notification-service/ in-app notifications from events       :8084  notification_db
+├── frontend/                    Angular 22 workspace: shell, claimant, staff, shared   :4200 / :4201 / :4202
 ├── contracts/
-│   ├── openapi/             exported OpenAPI spec of each service
-│   └── events/              claims.lifecycle.v1.schema.json (the Kafka contract)
-├── infra/postgres/          init script: 4 databases, 4 logins
-├── scripts/                 build-all.sh, e2e-smoke.mjs, verify-fresh-stack.sh
-├── docker-compose.yml
-└── docs/                    ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, AI_JOURNAL.md, claims-flow.html, screenshots/
+│   ├── openapi/                 exported OpenAPI spec of each service
+│   └── events/                  claims.lifecycle.v1.schema.json (the Kafka contract)
+├── infra/postgres/              init script: 4 databases, 4 logins
+├── scripts/                     build-all.sh, e2e-smoke.mjs, verify-fresh-stack.sh
+├── docker-compose.yml           whole stack, run from the repository root
+└── docs/                        ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, AI_JOURNAL.md, claims-flow.html, screenshots/
 ```
 
 The small cross-cutting package `common/` (JWT resource-server config, RFC 7807 handler, correlation-id filter,

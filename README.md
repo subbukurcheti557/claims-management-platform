@@ -19,6 +19,33 @@ Angular 22 with Native Federation micro-frontends · Angular Material 3 · JWT �
 
 ---
 
+## Repository layout
+
+```
+claims-management-platform/
+├── backend/                     6 independent Spring Boot services (folder only, NO parent pom)
+│   ├── platform/
+│   │   ├── discovery-server/    Eureka                                   :8761
+│   │   └── api-gateway/         Spring Cloud Gateway, JWT, CORS          :8080
+│   └── services/
+│       ├── identity-service/    users, login, JWT issuance               :8081  identity_db
+│       ├── policy-service/      policies, coverage, paid-to-date         :8082  policy_db
+│       ├── claims-service/      claim lifecycle, queue, dashboards       :8083  claims_db
+│       └── notification-service/ in-app notifications from events       :8084  notification_db
+├── frontend/                    Angular 22 workspace: shell, claimant, staff, shared   :4200 / :4201 / :4202
+├── contracts/
+│   ├── openapi/                 exported OpenAPI spec of each service
+│   └── events/                  claims.lifecycle.v1.schema.json (the Kafka contract)
+├── infra/postgres/              init script: 4 databases, 4 logins
+├── scripts/                     build-all.sh, e2e-smoke.mjs, verify-fresh-stack.sh
+├── docker-compose.yml           whole stack, run from the repository root
+└── docs/                        ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, AI_JOURNAL.md, claims-flow.html, screenshots/
+```
+
+`backend/` is only a folder: each service has its own `pom.xml`, Dockerfile, database and tests, and builds on its own.
+
+---
+
 ## Run it
 
 Prerequisites: Docker Desktop (4 GB of memory is enough), JDK 17 or newer, Maven 3.9, Node 22 or newer.
@@ -60,7 +87,7 @@ Sixteen seeded claims cover every status and market, so the queue and dashboard 
 
 ```bash
 docker compose up -d postgres kafka discovery-server       # infrastructure only
-cd claims-service && mvn spring-boot:run                   # any service, defaults point at localhost
+cd backend/services/claims-service && mvn spring-boot:run  # any service, defaults point at localhost
 cd frontend && npm ci && npm run start:all                 # shell :4200 + remotes :4201/:4202 with live reload
 ```
 
@@ -114,7 +141,7 @@ cd frontend && npm ci && npm run start:all                 # shell :4200 + remot
 Backend integration tests use real PostgreSQL 16 (Testcontainers) and an embedded Kafka broker, so Docker must be running.
 
 ```bash
-cd claims-service && mvn verify                 # any service
+cd backend/services/claims-service && mvn verify # any service
 cd frontend && npm test                         # all frontend unit tests
 node scripts/e2e-smoke.mjs                      # against a running stack
 cd frontend && npx playwright install chromium && npx playwright test

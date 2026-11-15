@@ -18,10 +18,10 @@ if [[ "${OS:-}" == "Windows_NT" ]]; then
   export MAVEN_OPTS="${MAVEN_OPTS:-} -Djavax.net.ssl.trustStoreType=Windows-ROOT"
 fi
 
-SERVICES=(discovery-server api-gateway identity-service policy-service claims-service notification-service)
+SERVICES=(platform/discovery-server platform/api-gateway services/identity-service services/policy-service services/claims-service services/notification-service)
 for svc in "${SERVICES[@]}"; do
   echo "==> Building $svc"
-  (cd "$ROOT/$svc" && mvn -B -q package $SKIP_TESTS)
+  (cd "$ROOT/backend/$svc" && mvn -B -q package $SKIP_TESTS)
 done
 
 if [[ $FRONTEND -eq 1 ]]; then

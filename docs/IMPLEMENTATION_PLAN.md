@@ -6,8 +6,8 @@ Backend first (brief: "majority of your time"), then frontend. Each phase ends w
 
 All phases 0–14 are done and verified, with these changes from the plan below:
 
-- **Repository layout:** independent Maven projects at the repository root (no `backend/` parent, no shared jars),
-  as decided in AI journal entry 2.
+- **Repository layout:** independent Maven projects (no parent pom, no shared jars, AI journal entry 2), grouped in
+  plain folders `backend/platform/` and `backend/services/` next to `frontend/` and `docs/` (AI journal entry 7).
 - **Integration tests:** Testcontainers PostgreSQL instead of H2.
 - **Frontend API types:** hand-written, not generated. Generating them from the specs is the open follow-up.
 - **Remote names:** `claimant` and `staff` (not `claimant-mfe` / `staff-mfe`).
@@ -32,7 +32,7 @@ All phases 0–14 are done and verified, with these changes from the plan below:
 | notification-service | 8084 | Kafka UI (optional) | 8090 |
 
 Run modes:
-* `docker compose -f infra/docker-compose.yml up --build` — everything.
+* `docker compose --profile frontend up -d --build` (from the repository root) — everything.
 * Dev: `docker compose up postgres kafka` + `mvn spring-boot:run` per service + `npm start` in `frontend/`.
 
 ## Phases
