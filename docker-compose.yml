@@ -176,5 +176,21 @@ services:
       - api-gateway
     profiles: ["frontend"]
 
+  # Optional: browse topics, messages and consumer groups at http://localhost:8089
+  #   docker compose --profile tools up -d kafka-ui
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.2.0
+    container_name: icmp-kafka-ui
+    ports:
+      - "8089:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: icmp-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    profiles: ["tools"]
+
 volumes:
   postgres-data:

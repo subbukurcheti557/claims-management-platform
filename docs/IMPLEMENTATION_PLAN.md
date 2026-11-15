@@ -29,7 +29,7 @@ All phases 0–14 are done and verified, with these changes from the plan below:
 | identity-service | 8081 | staff-mfe | 4202 |
 | policy-service | 8082 | PostgreSQL 16 | 5432 |
 | claims-service | 8083 | Kafka (KRaft, apache/kafka) | 9092 |
-| notification-service | 8084 | Kafka UI (optional) | 8090 |
+| notification-service | 8084 | Kafka UI (optional) | 8089 |
 
 Run modes:
 * `docker compose --profile frontend up -d --build` (from the repository root) — everything.

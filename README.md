@@ -12,6 +12,7 @@ Angular 22 with Native Federation micro-frontends · Angular Material 3 · JWT �
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | High- and low-level design, service boundaries, REST vs Kafka, data model, API, events, security, decisions |
 | [docs/claims-flow.html](docs/claims-flow.html) | Step-by-step walkthrough: what is synchronous, where Kafka is used, which tables change (open in a browser) |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Phases, test strategy and their status |
+| [docs/MANUAL_TEST_GUIDE.md](docs/MANUAL_TEST_GUIDE.md) | Step-by-step manual tests: DBeaver connection, Kafka UI, what to click, which rows and events to check |
 | [docs/AI_JOURNAL.md](docs/AI_JOURNAL.md) | How the AI was directed, challenged and overridden |
 | [contracts/](contracts) | OpenAPI spec of each service and the JSON Schema of the Kafka event |
 
@@ -62,6 +63,7 @@ The first start takes about 1–2 minutes while the services register with Eurek
 | http://localhost:4200 | The application (shell). Micro-frontends are served from :4201 (claimant) and :4202 (staff) |
 | http://localhost:8080 | API gateway (the only backend address the browser uses) |
 | http://localhost:8761 | Eureka dashboard |
+| http://localhost:8089 | Kafka UI (optional: `docker compose --profile tools up -d kafka-ui`) |
 | http://localhost:808{1..4}/swagger-ui.html | Swagger UI of each service, reachable from inside the Docker network (`docker exec`) or when run locally |
 
 Faster build without tests: `./scripts/build-all.sh --skip-tests`.
