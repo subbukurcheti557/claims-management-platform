@@ -19,7 +19,11 @@ complete plan and flow before writing code.
   coverage check, Kafka for lifecycle events, and a transactional outbox.
 
 **Accepted:** the service split, REST vs Kafka rule, outbox, and the MFE approach.
-**Developer's notes:** _(add your own view here before the walkthrough)_
+**Developer's notes:** The service split (claims / policy / notification, with identity as a platform service) and the
+rule "REST when the caller needs an answer now, Kafka when it is a fact others react to" made sense to me. But when I
+reviewed the plan's folder structure I saw a parent pom with shared jars, which is a Maven multi-module build, not
+independent microservices. I challenged it (entry 2). I also asked for PostgreSQL instead of H2 in tests (entry 4), and
+I asked for a step-by-step flow (entry 3) so I could explain and defend every step myself.
 
 ---
 
