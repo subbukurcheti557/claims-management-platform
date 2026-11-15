@@ -92,6 +92,7 @@ flowchart LR
 | FNOL → **coverage check** (claims → policy) | **Sync REST** (load-balanced `RestClient`, Resilience4j circuit breaker + timeout) | Claimant must be told *now* if the policy is inactive / incident outside period / wrong product. Result is **snapshotted onto the claim** so later reads never call policy-service |
 | Claim lifecycle changes → notifications | **Kafka** | Fire-and-forget; notification outage must not fail a claim decision |
 | Claim settled → policy paid-to-date | **Kafka** | Eventual consistency is acceptable; decouples policy from claim workflow |
+| Manager assigns a claim to another officer (claims → identity) | **Sync REST** `GET /internal/users/{id}` (circuit breaker) | The assignee must be a real, active claims user *before* the claim is changed. Self pick-up needs no call: the officer's id and name come from their JWT |
 | Workload / exposure dashboards | REST queries on claims_db | Same consistency boundary; no need for a separate projection at this scale (ADR-007) |
 
 **Reliability:** claims-service writes state change **and** an `outbox_event` row in one DB transaction; a scheduled relay publishes to Kafka (`acks=all`, idempotent producer) and marks rows sent. Consumers are **idempotent** (`processed_event` table keyed by `eventId`) and use `DefaultErrorHandler` with retries → `claims.lifecycle.v1.DLT`.
@@ -111,7 +112,8 @@ stateDiagram-v2
   UNDER_REVIEW --> INFO_REQUESTED: officer requests info
   INFO_REQUESTED --> UNDER_REVIEW: claimant responds
   UNDER_REVIEW --> ASSESSED: officer records assessment + reserve
-  ASSESSED --> UNDER_REVIEW: re-open assessment
+  ASSESSED --> ASSESSED: re-assess (new reserve)
+  ASSESSED --> INFO_REQUESTED: more information needed
   ASSESSED --> APPROVED: approve (amount ≤ authority limit, else manager)
   APPROVED --> SETTLED: payment recorded
   UNDER_REVIEW --> REJECTED: reject (reason code)
@@ -124,7 +126,13 @@ stateDiagram-v2
 ```
 
 Implemented as a pure-Java `ClaimStatus` enum with an allowed-transition table plus guard methods on the `Claim` aggregate
-(**State pattern**). Illegal transitions throw `InvalidClaimTransitionException` → HTTP 409.
+(**State pattern**). Rule failures throw `ClaimRuleException` with a kind that the web layer maps to HTTP:
+`INVALID_TRANSITION` / `STALE_VERSION` → 409, `NOT_PERMITTED` → 403, `RULE_VIOLATION` → 422.
+`ClaimStatusTest` checks all 64 status pairs against the table.
+
+Further rules enforced by the aggregate: only the assigned officer or a manager may act; amounts cannot exceed
+sum insured − deductible; a DENIED assessment must recommend 0 and cannot be approved; a claim returns to review only
+when *all* open questions are answered; withdrawing cancels open questions.
 
 **Authority limits** (configurable): `CLAIMS_OFFICER` may approve up to the USD-equivalent of 25,000; above that only `CLAIMS_MANAGER`.
 
@@ -188,8 +196,12 @@ Other services:
 
 ### 4.4 Triage (Strategy pattern)
 
-`PriorityRule` implementations evaluated at FNOL: high estimated loss (> USD 50k) → HIGH; injury reported → HIGH;
-property + "flood/fire" keyword → MEDIUM; default LOW. SLA first-response due: HIGH 1 day, MEDIUM 2 days, LOW 3 days.
+`PriorityRule` implementations evaluated at FNOL, highest result wins: estimated loss > USD 50k → HIGH, > USD 15k → MEDIUM;
+injury reported → HIGH; property claim mentioning a catastrophe peril (flood, fire, storm, typhoon…) → MEDIUM; default LOW.
+
+**SLA = target date to resolve the claim**, set at FNOL: HIGH 7 days, MEDIUM 14, LOW 21. A claim is *overdue* while
+open and past that date. (Changed from the first plan's "first response" SLA: one clock is easier for officers to act
+on and for managers to report.)
 
 ---
 
@@ -242,9 +254,14 @@ Commands are **intent-based** (`/approve`, `/reject`) rather than `PATCH status`
 | POST | `/api/notifications/{id}/read` |
 | POST | `/api/notifications/read-all` |
 
-**Contract ownership:** each service is the owner of its OpenAPI spec (springdoc, code-first). Specs are exported to
-`contracts/*.openapi.json` and the frontend's TypeScript types are generated from them (`openapi-typescript`), so drift
-fails the frontend build rather than at runtime (ADR-006).
+Also: `GET /internal/users/{id}` on identity-service (service-to-service, blocked at the gateway). Every claim response
+carries `allowedActions` for the current status, so the UI never re-implements the state machine.
+
+**Contract ownership:** each service owns its OpenAPI spec (springdoc, code-first, live at `/v3/api-docs` and
+`/swagger-ui.html` on each service). The specs are exported to `contracts/openapi/*.openapi.json`; the Kafka event contract
+is `contracts/events/claims.lifecycle.v1.schema.json`.
+*Deviation from the plan:* the frontend types in `@icmp/shared` (`api.models.ts`) are written by hand to mirror those
+specs instead of being generated with `openapi-typescript`. Generation plus a CI drift check is the first follow-up (ADR-006).
 
 ---
 
@@ -356,57 +373,75 @@ exposure by market/type table + bar chart, ageing buckets, per-officer workload 
 
 ## 9. Backend low-level design
 
-### 9.1 Repository layout
+### 9.1 Repository layout (independent services)
+
+Each service is its own Maven project with its own `pom.xml` (parent: `spring-boot-starter-parent` 3.4.5), its own
+database, Dockerfile and test suite. There is **no parent build and no shared jar**: the services share only REST
+contracts and the event JSON schema. (Changed from the first plan's multi-module build with `platform-commons` and
+`event-contracts` modules, see the AI journal, entry 2.)
 
 ```
 claims-management-platform/
-├── backend/                       Maven multi-module (parent pom, Java 17, Boot 3.4.5, Cloud 2024.0.1)
-│   ├── platform-commons/          JWT resource-server autoconfig, ProblemDetail handler, correlation-id filter, CurrentUser
-│   ├── event-contracts/           ClaimLifecycleEvent envelope + EventType enum (versioned, no Spring deps)
-│   ├── discovery-server/
-│   ├── api-gateway/
-│   ├── identity-service/
-│   ├── policy-service/
-│   ├── claims-service/
-│   └── notification-service/
-├── frontend/                      Angular workspace (Native Federation)
-│   └── projects/{shell, claimant-mfe, staff-mfe, shared}
-├── contracts/                     exported OpenAPI specs
-├── infra/                         docker-compose.yml, postgres/init.sql (4 DBs + 4 users)
-└── docs/                          ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, AI_JOURNAL.md, adr/
+├── discovery-server/        Eureka                                   :8761
+├── api-gateway/             Spring Cloud Gateway, JWT, CORS          :8080
+├── identity-service/        users, login, JWT issuance               :8081  identity_db
+├── policy-service/          policies, coverage, paid-to-date         :8082  policy_db
+├── claims-service/          claim lifecycle, queue, dashboards       :8083  claims_db
+├── notification-service/    in-app notifications from events         :8084  notification_db
+├── frontend/                Angular 22 workspace: shell, claimant, staff, shared   :4200 / :4201 / :4202
+├── contracts/
+│   ├── openapi/             exported OpenAPI spec of each service
+│   └── events/              claims.lifecycle.v1.schema.json (the Kafka contract)
+├── infra/postgres/          init script: 4 databases, 4 logins
+├── scripts/                 build-all.sh, e2e-smoke.mjs, verify-fresh-stack.sh
+├── docker-compose.yml
+└── docs/                    ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, AI_JOURNAL.md, claims-flow.html, screenshots/
 ```
 
-### 9.2 Package structure (per business service, layered by feature)
+The small cross-cutting package `common/` (JWT resource-server config, RFC 7807 handler, correlation-id filter,
+`CurrentUser`) is **copied** into each servlet service. That is a deliberate trade: about 300 lines duplicated, in
+exchange for services that build, version and deploy independently. In an organisation it would become a versioned
+internal starter published from its own repository.
+
+### 9.2 Package structure (claims-service; the others follow the same shape)
 
 ```
 com.icmp.claims
-├── ClaimsServiceApplication
 ├── claim/
-│   ├── api/            ClaimantClaimController, StaffClaimController, dto/ (records + Bean Validation), ClaimMapper
-│   ├── application/    ClaimCommandService, ClaimQueryService, command/ (SubmitClaimCommand …), port/ (PolicyCoveragePort, EventPublisherPort)
-│   ├── domain/         Claim (aggregate), ClaimStatus (state table), Assessment, InfoRequest, Money, Market, triage/PriorityRule*,
-│   │                   AuthorityPolicy, exceptions — no Spring/JPA annotations except JPA mapping kept in infra if it pays off
-│   └── infrastructure/ persistence/ (JPA repos, Specifications), policy/ (PolicyCoverageClient — Adapter + Resilience4j),
-│                       messaging/ (OutboxWriter, OutboxRelay, KafkaConfig)
-├── stats/              api/ + application/ (WorkloadQueryService, ExposureQueryService — native/JPQL aggregates)
-└── config/             SecurityConfig, OpenApiConfig, FxProperties, AuthorityProperties
+│   ├── api/                ClaimantClaimController, StaffClaimController, ClaimReadController, ClaimRequests (validated records)
+│   ├── application/        ClaimCommandService, ClaimQueryService, ClaimCommands, ClaimViewMapper
+│   │   ├── port/           PolicyCoveragePort, StaffDirectoryPort, EventOutboxPort      (what the use cases need)
+│   │   └── view/           ClaimViews (read models; staff-only fields are null for claimants)
+│   ├── domain/             Claim (aggregate), ClaimStatus (transition table), InfoRequest, Assessment, ClaimNote,
+│   │   │                   ClaimStatusHistory, AuthorityPolicy, CurrencyConverter, ClaimDomainEvent, ClaimRuleException
+│   │   └── triage/         PriorityRule, HighValueRule, InjuryRule, CatastropheKeywordRule, TriagePolicy
+│   └── infrastructure/
+│       ├── persistence/    ClaimRepository, ClaimSpecifications, ClaimFigures (dashboard projection)
+│       ├── messaging/      OutboxEvent, OutboxEventWriter (EventOutboxPort), OutboxRelay, KafkaTopicConfig
+│       └── client/         PolicyCoverageRestAdapter, StaffDirectoryRestAdapter (circuit breakers), RestClientConfig
+├── stats/                  StatsController, StatsService, StatsViews (exposure, workload)
+├── config/                 DomainConfig (wires domain services), ClaimsProperties, StaticFxRateConverter
+└── common/                 security/, web/, error/
 ```
 
-Pragmatic note: JPA annotations live on the domain aggregate (one model) — the alternative (separate domain + persistence models
-with mappers) doubles code for little gain at this size. Domain logic is still unit-testable without Spring.
+Pragmatic note: JPA annotations live on the domain aggregate (one model). The alternative, separate domain and persistence
+models with mappers, doubles the code for little gain at this size. The domain has no Spring dependencies and is unit
+tested without a container (`ClaimTest`, `ClaimStatusTest`, `TriagePolicyTest`).
 
 ### 9.3 Design patterns and SOLID
 
 | Pattern | Where |
 |---|---|
-| State (transition table) | `ClaimStatus` / `Claim.transitionTo()` |
-| Strategy | `PriorityRule`s, `NotificationTemplate` per event type, `AuthorityPolicy` |
-| Adapter / Port | `PolicyCoveragePort` ← `PolicyCoverageRestAdapter` (claims doesn't know HTTP) |
-| Transactional Outbox | `OutboxWriter` + `OutboxRelay` |
-| Idempotent Consumer | `processed_event` in notification/policy |
-| Specification | queue filtering |
-| Factory | `ClaimEventFactory` builds envelopes from domain changes |
-| Circuit Breaker | Resilience4j around coverage call |
+| State (transition table) | `ClaimStatus` + `Claim.transition()` |
+| Strategy | `PriorityRule`s (triage), `NotificationTemplates` per event type, `NotificationChannel` (in-app / email stub) |
+| Ports and adapters | `PolicyCoveragePort` ← `PolicyCoverageRestAdapter`, `StaffDirectoryPort` ← `StaffDirectoryRestAdapter`, `EventOutboxPort` ← `OutboxEventWriter` |
+| Domain events | `Claim` records `ClaimDomainEvent`s; the application layer drains them into the outbox |
+| Transactional Outbox | `OutboxEventWriter` (same TX) + `OutboxRelay` (scheduled publisher) |
+| Idempotent Consumer | `processed_event` in notification-service and policy-service |
+| Tolerant Reader | each consumer maps only the event fields it needs (`ClaimEvent`, `ClaimLifecycleMessage`) |
+| Specification | `ClaimSpecifications` for queue filters |
+| Optimistic locking | `@Version` + `expectedVersion` on commands |
+| Circuit Breaker + time limiter | Resilience4j around both outbound REST calls |
 | API Gateway, Service Registry, DB-per-service | platform |
 
 SRP: claimant vs staff controllers; command vs query services (light CQRS). OCP: new triage rule = new bean. DIP: application
@@ -414,43 +449,43 @@ layer depends on ports, not Kafka/HTTP.
 
 ### 9.4 Cross-cutting
 
-* Flyway migrations per service + seed data (`R__seed.sql` in local profile).
+* Flyway migrations per service; demo data in versioned migrations (`V2__seed_*`), users seeded by `DemoUserSeeder` (BCrypt).
 * Optimistic locking (`@Version`), `expectedVersion` on commands.
-* `X-Correlation-Id` generated at gateway, propagated to services and Kafka headers, in MDC log pattern.
+* `X-Correlation-Id` generated at the gateway (or by the browser), put in the logging MDC by every service, forwarded on
+  service-to-service calls and returned in every problem detail.
 * Actuator health/readiness; Docker healthchecks gate start order.
 * springdoc OpenAPI UI per service.
 
 ---
 
-## 10. Frontend design (Angular 22 + Native Federation)
+## 10. Frontend design (Angular 22 + Native Federation v4)
 
 ```
 frontend/projects/
-├── shell/          host: login page, AuthStore, HTTP interceptor (JWT + correlation id), role-based nav,
-│                   app layout, theme toggle, NotificationBell (polling store), loads remotes by role
-├── claimant-mfe/   exposes ./routes: My claims list, Report incident (stepper wizard), Claim detail
-│                   (status tracker, timeline, answer info requests, withdraw, decision banner)
-├── staff-mfe/      exposes ./routes: Work queue (tabs Unassigned/Mine/Team, filters, SLA chips),
-│                   Claim workspace (summary, coverage snapshot, timeline, notes, actions panel:
-│                   request info / assess / approve / settle / reject), Dashboard (KPIs, exposure, workload)
-└── shared/         library: generated API types, ApiClient services, auth token accessor, status-chip,
-                    money pipe, page-header, empty/error states, confirm dialog, design tokens
+├── shell/      host (:4200): login, layout + role-based nav, notification bell (polling store), theme toggle,
+│               loads a remote per role from public/federation.manifest.json; fallback page if a remote is down
+├── claimant/   remote (:4201) exposes ./routes: My claims, Report an incident (3-step wizard), Claim detail
+│               (progress tracker, decision banner, answer questions, withdraw, history)
+├── staff/      remote (:4202) exposes ./routes: Work queue (tabs, filters, paging, sorting, pick-up), Claim workspace
+│               (details, cover, questions, assessments, action panel, notes, history), Dashboard (exposure, workload)
+└── shared/     @icmp/shared — federation singleton: API types, typed API clients, AuthStore, auth interceptor,
+                role guards, problem-detail messages, status/priority chips, timeline, pipes, design tokens (_theme.scss)
 ```
 
-* **Two user types, one codebase:** shell authenticates, reads `role` from the JWT, and lazy-loads only the remote the role
-  needs (`/claimant/**` vs `/staff/**`) behind `roleGuard`. Each remote is independently buildable/deployable.
-* **Shared singletons:** Angular core, router, Material and `shared` lib declared `singleton: true` in federation config so the
-  auth state is one instance across host + remotes.
-* **State:** feature-scoped signal stores (`ClaimsListStore`, `ClaimDetailStore`, `QueueStore`, `DashboardStore`,
-  `NotificationStore`) exposing read-only signals + intent methods; components are mostly presentational (`OnPush`, `input()`/`output()`).
-* **Async UX:** after a command the store re-fetches the claim (server is the source of truth); 409 → "This claim changed —
-  reloaded" snackbar; notifications polled every 30 s and on window focus.
-* **Theming/a11y:** Material M3 theme with CSS custom-property tokens, light/dark toggle persisted, status colours that are not
-  colour-only (icon + text), focus-visible styles, labelled form fields, `aria-live` for async results, skip-link.
-* **Fallback (risk control):** if Native Federation misbehaves with the installed Angular version, the same three projects are
-  consumed as lazy-loaded libraries in the shell — the component/store code is unchanged (ADR-003).
-
----
+* **Two user types, one codebase:** the shell reads the role from the session and lazy-loads only that user's remote
+  (`/claimant/**` or `/staff/**`, guarded by `roleGuard`). Each remote also runs on its own dev server.
+* **Shared singletons:** Angular, Material and `@icmp/shared` are shared as singletons, so the shell and the remotes use
+  one `AuthStore` instance (one login).
+* **State:** one signal store per feature, provided at page level (`MyClaimsStore`, `ClaimDetailStore`, `QueueStore`,
+  `WorkspaceStore`, `DashboardStore`, shell `NotificationStore`). Stores expose read-only signals and intent methods;
+  pages bind to them; `ActionPanelComponent` is purely presentational (inputs and outputs only).
+* **Async UX:** after every command the store takes the server's response as the new state and refreshes the history.
+  A 409 reloads the claim and tells the officer why. Notifications are polled every 30 s and when the tab regains focus.
+* **Theming and a11y:** Material 3 theme plus app tokens using CSS `light-dark()`; follows the OS with a 3-way toggle.
+  Status is shown as icon plus text, never colour alone. There is a skip link, labelled fields and visible focus, and
+  `role="alert"`/`role="status"` for async results.
+* **Federation config notes:** Material and CDK ship Node-only schematics, which must be excluded with `skip` in each
+  `federation.config.mjs`, or the shared bundle fails to build.
 
 ## 11. Assumptions
 
@@ -463,10 +498,12 @@ frontend/projects/
 7. Notifications are in-app only; email/SMS is a logged stub behind a `NotificationChannel` strategy.
 8. Single Postgres **instance** with four isolated databases/users locally (logical DB-per-service); production would be separate instances.
 9. Target Java 17 bytecode (`--release 17`); local dev JDK is 24, Docker images use Temurin 17.
+10. A manager is also allowed to act on any claim (assess, approve, reject); officers only on claims assigned to them.
+11. Sessions are kept in sessionStorage (closing the tab signs out). Tokens last 60 minutes and there is no refresh token.
 
 ---
 
-## 12. ADRs (summary — full text in `docs/adr/`)
+## 12. Architecture decisions
 
 | # | Decision | Alternatives rejected |
 |---|---|---|
@@ -475,7 +512,9 @@ frontend/projects/
 | 003 | Native Federation MFEs (shell + 2 remotes by user type) | one SPA with lazy modules (doesn't meet MFE rubric); Webpack Module Federation (Angular now esbuild-based) |
 | 004 | Coverage check failure → refuse FNOL (503) | accept as "PENDING_VERIFICATION" (more states, better availability — noted as next step) |
 | 005 | HS256 JWT from own identity-service | Keycloak (heavier local setup); RS256/JWKS (next step) |
-| 006 | Code-first OpenAPI exported + TS types generated | contract-first (slower in a sprint) |
+| 006 | Code-first OpenAPI, specs exported to `contracts/openapi`; frontend types hand-written for now (generation is the next step) | contract-first (slower in a sprint) |
 | 007 | Dashboards query claims_db directly | separate CQRS analytics service on Kafka (premature at this scale) |
 | 008 | Reserve-based exposure definition §4.3 | estimated-loss only (overstates) |
 | 009 | Transactional outbox | direct `kafkaTemplate.send` in TX (dual-write inconsistency) |
+| 010 | Independent Maven projects per service, cross-cutting code copied, events shared as JSON Schema | multi-module build with shared `platform-commons` / `event-contracts` jars (couples releases) |
+| 011 | Integration tests on real PostgreSQL (Testcontainers) and embedded Kafka | H2 (would hide PostgreSQL-specific SQL such as `jsonb`, sequences, partial indexes) |

@@ -2,6 +2,24 @@
 
 Backend first (brief: "majority of your time"), then frontend. Each phase ends with **compile + tests green + a commit**.
 
+## Status (15 Nov 2026)
+
+All phases 0–14 are done and verified, with these changes from the plan below:
+
+- **Repository layout:** independent Maven projects at the repository root (no `backend/` parent, no shared jars),
+  as decided in AI journal entry 2.
+- **Integration tests:** Testcontainers PostgreSQL instead of H2.
+- **Frontend API types:** hand-written, not generated. Generating them from the specs is the open follow-up.
+- **Remote names:** `claimant` and `staff` (not `claimant-mfe` / `staff-mfe`).
+
+| Phase | Result |
+|---|---|
+| 1–8 backend + Docker | 121 tests pass; `docker compose up` brings all services up healthy |
+| 9 backend E2E | `scripts/e2e-smoke.mjs`: 35/35 checks |
+| 10–12 frontend | shell + 2 remotes build and load via federation; 37 unit tests pass |
+| 13 FE E2E | Playwright: 6/6 against the full stack |
+| 14 docs | README, ARCHITECTURE, claims-flow.html, AI journal, OpenAPI + event schema exported, screenshots |
+
 ## Ports & runtime
 
 | Component | Port | Component | Port |

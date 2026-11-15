@@ -1,0 +1,222 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "OpenAPI definition",
+    "version": "v0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8082",
+      "description": "Generated server url"
+    }
+  ],
+  "paths": {
+    "/internal/policies/{policyNumber}/coverage": {
+      "get": {
+        "tags": [
+          "Policies"
+        ],
+        "summary": "Internal: is this incident covered by the policy?",
+        "operationId": "coverage",
+        "parameters": [
+          {
+            "name": "policyNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "claimantId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "incidentDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "claimType",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "MOTOR",
+                "PROPERTY"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/policies/{policyNumber}": {
+      "get": {
+        "tags": [
+          "Policies"
+        ],
+        "summary": "One policy; claimants can only see their own",
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "policyNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/policies/mine": {
+      "get": {
+        "tags": [
+          "Policies"
+        ],
+        "summary": "Policies held by the authenticated claimant",
+        "operationId": "mine",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PolicyResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CoverageResponse": {
+        "type": "object",
+        "properties": {
+          "policyNumber": {
+            "type": "string"
+          },
+          "covered": {
+            "type": "boolean"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "product": {
+            "type": "string"
+          },
+          "market": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "sumInsured": {
+            "type": "number"
+          },
+          "deductible": {
+            "type": "number"
+          },
+          "remainingSumInsured": {
+            "type": "number"
+          },
+          "holderName": {
+            "type": "string"
+          },
+          "insuredItem": {
+            "type": "string"
+          }
+        }
+      },
+      "PolicyResponse": {
+        "type": "object",
+        "properties": {
+          "policyNumber": {
+            "type": "string"
+          },
+          "holderName": {
+            "type": "string"
+          },
+          "product": {
+            "type": "string"
+          },
+          "market": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "insuredItem": {
+            "type": "string"
+          },
+          "sumInsured": {
+            "type": "number"
+          },
+          "deductible": {
+            "type": "number"
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "status": {
+            "type": "string"
+          },
+          "paidToDate": {
+            "type": "number"
+          },
+          "remainingSumInsured": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1579 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "OpenAPI definition",
+    "version": "v0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8083",
+      "description": "Generated server url"
+    }
+  ],
+  "paths": {
+    "/api/claims": {
+      "post": {
+        "tags": [
+          "Claims - claimant"
+        ],
+        "summary": "Report an incident (FNOL). Synchronously checks policy coverage.",
+        "operationId": "submit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/withdraw": {
+      "post": {
+        "tags": [
+          "Claims - claimant"
+        ],
+        "summary": "Withdraw a claim that has not been assessed",
+        "operationId": "withdraw",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/settle": {
+      "post": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Record the settlement payment for an approved claim",
+        "operationId": "settle",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/reject": {
+      "post": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Reject the claim with a reason code and an explanation for the claimant",
+        "operationId": "reject",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/notes": {
+      "get": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Internal notes, newest first",
+        "operationId": "notes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NoteView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Add an internal note",
+        "operationId": "addNote",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/info-requests": {
+      "post": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Ask the claimant for more information",
+        "operationId": "requestInformation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InfoRequestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/info-requests/{requestId}/response": {
+      "post": {
+        "tags": [
+          "Claims - claimant"
+        ],
+        "summary": "Answer an officer's request for information",
+        "operationId": "respond",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InfoResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/assign": {
+      "post": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Pick up a claim (officer, no officerId) or assign/reassign it (manager)",
+        "operationId": "assign",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/assessment": {
+      "post": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Record an assessment: liability, recommended amount, reserve, findings",
+        "operationId": "assess",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/approve": {
+      "post": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Approve the claim for an amount (officer authority limit applies)",
+        "operationId": "approve",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}": {
+      "get": {
+        "tags": [
+          "Claims - shared"
+        ],
+        "summary": "One claim (claimant: own claims only, redacted; staff: full view)",
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/{id}/timeline": {
+      "get": {
+        "tags": [
+          "Claims - shared"
+        ],
+        "summary": "Status history of a claim",
+        "operationId": "timeline",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TimelineEntry"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/stats/workload": {
+      "get": {
+        "tags": [
+          "Claims - dashboards"
+        ],
+        "summary": "Team workload and performance per officer",
+        "operationId": "workload",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/stats/me": {
+      "get": {
+        "tags": [
+          "Claims - dashboards"
+        ],
+        "summary": "The calling officer's own workload figures",
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfficerWorkload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/stats/exposure": {
+      "get": {
+        "tags": [
+          "Claims - dashboards"
+        ],
+        "summary": "Outstanding, paid and incurred liability by market, type, status and age",
+        "operationId": "exposure",
+        "parameters": [
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "SG",
+                "HK",
+                "AU",
+                "MY",
+                "TH",
+                "ID"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/Exposure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/queue": {
+      "get": {
+        "tags": [
+          "Claims - staff"
+        ],
+        "summary": "Work queue: UNASSIGNED (pick-up), MINE, TEAM (all open) or ALL, with filters",
+        "operationId": "queue",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "UNASSIGNED",
+                "MINE",
+                "TEAM",
+                "ALL"
+              ],
+              "default": "UNASSIGNED"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "SUBMITTED",
+                "UNDER_REVIEW",
+                "INFO_REQUESTED",
+                "ASSESSED",
+                "APPROVED",
+                "SETTLED",
+                "REJECTED",
+                "WITHDRAWN"
+              ]
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "SG",
+                "HK",
+                "AU",
+                "MY",
+                "TH",
+                "ID"
+              ]
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH"
+              ]
+            }
+          },
+          {
+            "name": "claimType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "MOTOR",
+                "PROPERTY"
+              ]
+            }
+          },
+          {
+            "name": "overdueOnly",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageable",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Pageable"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageViewClaimSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/claims/mine": {
+      "get": {
+        "tags": [
+          "Claims - claimant"
+        ],
+        "summary": "The claimant's own claims, newest first",
+        "operationId": "mine",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "SUBMITTED",
+                "UNDER_REVIEW",
+                "INFO_REQUESTED",
+                "ASSESSED",
+                "APPROVED",
+                "SETTLED",
+                "REJECTED",
+                "WITHDRAWN"
+              ]
+            }
+          },
+          {
+            "name": "pageable",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Pageable"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageViewClaimSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SubmitClaimRequest": {
+        "required": [
+          "claimType",
+          "description",
+          "estimatedLoss",
+          "incidentDate",
+          "incidentLocation",
+          "policyNumber"
+        ],
+        "type": "object",
+        "properties": {
+          "policyNumber": {
+            "maxLength": 30,
+            "minLength": 0,
+            "type": "string"
+          },
+          "claimType": {
+            "type": "string",
+            "enum": [
+              "MOTOR",
+              "PROPERTY"
+            ]
+          },
+          "incidentDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "incidentLocation": {
+            "maxLength": 300,
+            "minLength": 0,
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 4000,
+            "minLength": 20,
+            "type": "string"
+          },
+          "injuryReported": {
+            "type": "boolean"
+          },
+          "estimatedLoss": {
+            "minimum": 0.01,
+            "exclusiveMinimum": false,
+            "type": "number"
+          }
+        }
+      },
+      "AssessmentView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "liability": {
+            "type": "string"
+          },
+          "recommendedAmount": {
+            "type": "number"
+          },
+          "reserveAmount": {
+            "type": "number"
+          },
+          "findings": {
+            "type": "string"
+          },
+          "assessorName": {
+            "type": "string"
+          },
+          "assessedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClaimDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "claimNumber": {
+            "type": "string"
+          },
+          "policyNumber": {
+            "type": "string"
+          },
+          "claimType": {
+            "type": "string"
+          },
+          "market": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "incidentDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "incidentLocation": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "injuryReported": {
+            "type": "boolean"
+          },
+          "estimatedLoss": {
+            "type": "number"
+          },
+          "insuredItem": {
+            "type": "string"
+          },
+          "assignedOfficerName": {
+            "type": "string"
+          },
+          "approvedAmount": {
+            "type": "number"
+          },
+          "paidAmount": {
+            "type": "number"
+          },
+          "paymentReference": {
+            "type": "string"
+          },
+          "rejectionReasonCode": {
+            "type": "string"
+          },
+          "rejectionReason": {
+            "type": "string"
+          },
+          "decisionNote": {
+            "type": "string"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "infoRequests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InfoRequestView"
+            }
+          },
+          "claimantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "claimantName": {
+            "type": "string"
+          },
+          "assignedOfficerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "slaDueAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "overdue": {
+            "type": "boolean"
+          },
+          "reserveAmount": {
+            "type": "number"
+          },
+          "sumInsured": {
+            "type": "number"
+          },
+          "deductible": {
+            "type": "number"
+          },
+          "maxPayable": {
+            "type": "number"
+          },
+          "estimatedLossUsd": {
+            "type": "number"
+          },
+          "latestAssessment": {
+            "$ref": "#/components/schemas/AssessmentView"
+          },
+          "assessments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssessmentView"
+            }
+          },
+          "noteCount": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "InfoRequestView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "question": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "requestedByName": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "respondedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WithdrawRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 0,
+            "type": "string"
+          }
+        }
+      },
+      "SettleRequest": {
+        "required": [
+          "paymentReference"
+        ],
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "paymentReference": {
+            "maxLength": 60,
+            "minLength": 0,
+            "type": "string"
+          }
+        }
+      },
+      "RejectRequest": {
+        "required": [
+          "explanation",
+          "reasonCode"
+        ],
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "NOT_COVERED",
+              "POLICY_EXCLUSION",
+              "INSUFFICIENT_EVIDENCE",
+              "LATE_NOTIFICATION",
+              "FRAUD_SUSPECTED",
+              "OTHER"
+            ]
+          },
+          "explanation": {
+            "maxLength": 2000,
+            "minLength": 10,
+            "type": "string"
+          }
+        }
+      },
+      "NoteRequest": {
+        "required": [
+          "body"
+        ],
+        "type": "object",
+        "properties": {
+          "body": {
+            "maxLength": 4000,
+            "minLength": 0,
+            "type": "string"
+          }
+        }
+      },
+      "NoteView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string"
+          },
+          "authorName": {
+            "type": "string"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InfoRequestRequest": {
+        "required": [
+          "question"
+        ],
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "question": {
+            "maxLength": 2000,
+            "minLength": 5,
+            "type": "string"
+          }
+        }
+      },
+      "InfoResponseRequest": {
+        "required": [
+          "response"
+        ],
+        "type": "object",
+        "properties": {
+          "response": {
+            "maxLength": 4000,
+            "minLength": 0,
+            "type": "string"
+          }
+        }
+      },
+      "AssignRequest": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "officerId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "AssessmentRequest": {
+        "required": [
+          "findings",
+          "liability",
+          "recommendedAmount",
+          "reserveAmount"
+        ],
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "liability": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED",
+              "PARTIAL",
+              "DENIED"
+            ]
+          },
+          "recommendedAmount": {
+            "type": "number"
+          },
+          "reserveAmount": {
+            "type": "number"
+          },
+          "findings": {
+            "maxLength": 4000,
+            "minLength": 10,
+            "type": "string"
+          }
+        }
+      },
+      "ApproveRequest": {
+        "required": [
+          "amount"
+        ],
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "amount": {
+            "minimum": 0.01,
+            "exclusiveMinimum": false,
+            "type": "number"
+          }
+        }
+      },
+      "TimelineEntry": {
+        "type": "object",
+        "properties": {
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fromStatus": {
+            "type": "string"
+          },
+          "toStatus": {
+            "type": "string"
+          },
+          "actorName": {
+            "type": "string"
+          },
+          "actorRole": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          }
+        }
+      },
+      "OfficerWorkload": {
+        "type": "object",
+        "properties": {
+          "officerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "officerName": {
+            "type": "string"
+          },
+          "openClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "openByStatus": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "overdueClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "highPriorityOpen": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "closedLast30Days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "averageDaysToClose": {
+            "type": "number"
+          },
+          "outstandingUsd": {
+            "type": "number"
+          }
+        }
+      },
+      "Workload": {
+        "type": "object",
+        "properties": {
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "unassignedClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unassignedOverdue": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "officers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfficerWorkload"
+            }
+          }
+        }
+      },
+      "AgeBucket": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "openClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outstandingUsd": {
+            "type": "number"
+          }
+        }
+      },
+      "Exposure": {
+        "type": "object",
+        "properties": {
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reportingCurrency": {
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ExposureTotals"
+          },
+          "byMarket": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketExposure"
+            }
+          },
+          "byClaimType": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypeExposure"
+            }
+          },
+          "byStatus": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusExposure"
+            }
+          },
+          "ageing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgeBucket"
+            }
+          },
+          "fxRatesToUsd": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "ExposureTotals": {
+        "type": "object",
+        "properties": {
+          "openClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "overdueClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "settledClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outstandingUsd": {
+            "type": "number"
+          },
+          "paidUsd": {
+            "type": "number"
+          },
+          "incurredUsd": {
+            "type": "number"
+          }
+        }
+      },
+      "MarketExposure": {
+        "type": "object",
+        "properties": {
+          "market": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "openClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outstanding": {
+            "type": "number"
+          },
+          "outstandingUsd": {
+            "type": "number"
+          },
+          "paid": {
+            "type": "number"
+          },
+          "paidUsd": {
+            "type": "number"
+          },
+          "incurredUsd": {
+            "type": "number"
+          }
+        }
+      },
+      "StatusExposure": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "claims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outstandingUsd": {
+            "type": "number"
+          }
+        }
+      },
+      "TypeExposure": {
+        "type": "object",
+        "properties": {
+          "claimType": {
+            "type": "string"
+          },
+          "openClaims": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outstandingUsd": {
+            "type": "number"
+          },
+          "paidUsd": {
+            "type": "number"
+          }
+        }
+      },
+      "Pageable": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32"
+          },
+          "sort": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ClaimSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "claimNumber": {
+            "type": "string"
+          },
+          "policyNumber": {
+            "type": "string"
+          },
+          "claimType": {
+            "type": "string"
+          },
+          "market": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "incidentDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "estimatedLoss": {
+            "type": "number"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "assignedOfficerName": {
+            "type": "string"
+          },
+          "openInfoRequests": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "claimantName": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "reserveAmount": {
+            "type": "number"
+          },
+          "slaDueAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "overdue": {
+            "type": "boolean"
+          },
+          "assignedOfficerId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PageViewClaimSummary": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalElements": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      }
+    }
+  }
+}
