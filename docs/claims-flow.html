@@ -1,0 +1,738 @@
+<title>Claim Lifecycle Walkthrough</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: one reading column; each step is a card with two lanes — "while the user waits" (sync) and "after the response" (Kafka). */
+:root{
+  --bg:#f5f7f8; --surface:#ffffff; --fg:#14212b; --muted:#566673; --line:#d9e1e6;
+  --sync:#1f5fbf; --sync-bg:#e7effb;
+  --async:#a85a00; --async-bg:#fdf0df;
+  --write:#1d7a4d; --write-bg:#e3f4ea;
+  --read:#5b6b78; --read-bg:#edf1f4;
+  --bad:#b42318; --bad-bg:#fdecea;
+  --display:"Space Grotesk",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f161c; --surface:#16212a; --fg:#e4ebf0; --muted:#97a7b4; --line:#2a3945;
+  --sync:#7fb0ff; --sync-bg:#1a2c47; --async:#f2b263; --async-bg:#3a2a14;
+  --write:#6fd3a0; --write-bg:#173527; --read:#a9b8c4; --read-bg:#223039;
+  --bad:#ff8a80; --bad-bg:#3d1c1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f161c; --surface:#16212a; --fg:#e4ebf0; --muted:#97a7b4; --line:#2a3945;
+  --sync:#7fb0ff; --sync-bg:#1a2c47; --async:#f2b263; --async-bg:#3a2a14;
+  --write:#6fd3a0; --write-bg:#173527; --read:#a9b8c4; --read-bg:#223039;
+  --bad:#ff8a80; --bad-bg:#3d1c1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:16px/1.6 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+.wrap{max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.2}
+h1{font-size:2.1rem}
+h2{font-size:1.45rem;margin-top:12px}
+h3{font-size:1.15rem}
+p{margin:0;max-width:68ch}
+.lede{color:var(--muted);font-size:1.05rem}
+code,.mono{font-family:var(--mono);font-size:.88em}
+.eyebrow{font:500 .75rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.rule{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px 22px;display:grid;gap:14px}
+.rule-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.rule-grid > div{border-radius:8px;padding:14px 16px;min-width:0}
+.rule-grid .s{background:var(--sync-bg)} .rule-grid .a{background:var(--async-bg)}
+.rule-grid strong{display:block;font-family:var(--display);margin-bottom:4px}
+.rule-grid .s strong{color:var(--sync)} .rule-grid .a strong{color:var(--async)}
+.legend{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:.9rem;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:6px;font:500 .78rem var(--mono);padding:2px 8px;border-radius:999px;white-space:nowrap}
+.chip.sync{background:var(--sync-bg);color:var(--sync)}
+.chip.async{background:var(--async-bg);color:var(--async)}
+.chip.ins,.chip.upd{background:var(--write-bg);color:var(--write)}
+.chip.rd{background:var(--read-bg);color:var(--read)}
+.chip.err{background:var(--bad-bg);color:var(--bad)}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px}
+nav.toc a{font:500 .82rem var(--mono);color:var(--fg);text-decoration:none;border:1px solid var(--line);background:var(--surface);padding:4px 10px;border-radius:6px}
+nav.toc a:hover,nav.toc a:focus-visible{border-color:var(--sync);outline:none}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;scroll-margin-top:16px}
+.step-head{display:flex;gap:14px;align-items:baseline;padding:16px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.num{font:700 1.4rem var(--display);color:var(--muted);min-width:2ch}
+.step-head .who{color:var(--muted);font-size:.9rem}
+.step-head .grow{flex:1;min-width:200px}
+.lanes{display:grid;grid-template-columns:1fr 1fr}
+.lane{padding:16px 20px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.lane + .lane{border-left:1px solid var(--line)}
+.lane.single{grid-column:1 / -1}
+.lane h4{margin:0;font:600 .8rem var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.lane.s h4{color:var(--sync)} .lane.a h4{color:var(--async)}
+.lane ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px}
+.lane li{max-width:62ch}
+.tables{display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--line);padding-top:10px}
+.tables div{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:.92rem}
+.tables .db{font-family:var(--mono);font-size:.82rem;color:var(--muted)}
+.why{padding:12px 20px;background:var(--bg);border-top:1px solid var(--line);font-size:.93rem;color:var(--muted)}
+.why b{color:var(--fg)}
+.none{color:var(--muted);font-style:italic}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:720px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 .75rem var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+tr:last-child td{border-bottom:none}
+td .mono{white-space:nowrap}
+.fail{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.fail > div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.fail strong{font-family:var(--display)}
+.diagram{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;overflow-x:auto}
+.talk{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 22px}
+.talk ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:8px}
+@media (max-width:680px){
+  .lanes{grid-template-columns:1fr}
+  .lane + .lane{border-left:none;border-top:1px solid var(--line)}
+  h1{font-size:1.7rem}
+}
+</style>
+
+<div class="wrap">
+
+<header style="display:flex;flex-direction:column;gap:10px">
+  <span class="eyebrow">Claims platform · presentation notes</span>
+  <h1>Claim lifecycle, step by step</h1>
+  <p class="lede">One motor claim followed from login to payment. Each step shows what happens while the user waits (synchronous REST), what happens afterwards through Kafka, and exactly which database tables change.</p>
+</header>
+
+<section id="about" style="display:flex;flex-direction:column;gap:14px">
+  <h2>What this project is</h2>
+  <p>An <b>insurance claims management platform</b> for an APAC insurer that handles <b>motor and property claims across six markets</b> (Singapore, Hong Kong, Australia, Malaysia, Thailand, Indonesia). It is a full-stack web application: Java Spring Boot microservices behind an API gateway, Kafka for events, PostgreSQL with one database per service, and one Angular application split into micro-frontends.</p>
+  <div class="fail">
+    <div><strong>The problem today</strong><p>Claimants report by phone or email and get no visibility afterwards. Claims staff work from shared inboxes and spreadsheets with no view of their workload. Managers have no real-time picture of outstanding claims or how much money the company owes on them.</p></div>
+    <div><strong>What the platform changes</strong><p>Claimants report and track claims online. Every claim follows one controlled lifecycle with an audit trail. Staff get a prioritised work queue. Managers see workload and liability exposure live.</p></div>
+  </div>
+
+  <h3>Who uses it and what they can do</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>User</th><th>Role in the system</th><th>What they can do</th></tr></thead>
+    <tbody>
+      <tr><td>Claimant (policyholder)</td><td class="mono">CLAIMANT</td><td>Report an incident against their own policy, see all their claims and a status tracker, answer the officer's questions, withdraw a claim, receive decisions and payment notifications</td></tr>
+      <tr><td>Claims officer</td><td class="mono">CLAIMS_OFFICER</td><td>See unassigned claims sorted by priority and SLA, pick up claims, ask for information, record an assessment and reserve, approve up to USD 25,000, record settlement, reject with a reason, write internal notes, see own and team workload</td></tr>
+      <tr><td>Claims manager</td><td class="mono">CLAIMS_MANAGER</td><td>Everything an officer can do, plus approve above the officer limit, assign or reassign claims between officers, and view the liability exposure and team performance dashboard</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>What the system handles</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Capability</th><th>How it is handled</th><th>Service</th></tr></thead>
+    <tbody>
+      <tr><td>Login and access control</td><td>JWT issued at login; checked at the gateway and again in every service; role rules per endpoint; claimants only ever see their own claims</td><td class="mono">identity, gateway, all</td></tr>
+      <tr><td>Incident reporting (FNOL)</td><td>Step-by-step form; live policy coverage check; claim number generated; priority and SLA set automatically</td><td class="mono">claims, policy</td></tr>
+      <tr><td>Policy coverage</td><td>Policy must be active, belong to the claimant, cover the incident date and match the claim type. Sum insured and deductible copied onto the claim</td><td class="mono">policy</td></tr>
+      <tr><td>Claim lifecycle</td><td>One state machine: Submitted, Under review, Info requested, Assessed, Approved, Settled, or Rejected / Withdrawn. Illegal moves are refused</td><td class="mono">claims</td></tr>
+      <tr><td>Work queue and assignment</td><td>Unassigned / mine / team views, filters, SLA due dates; two officers cannot take the same claim</td><td class="mono">claims</td></tr>
+      <tr><td>Requests for information</td><td>Officer asks a question, claimant answers on the claim page, claim returns to review</td><td class="mono">claims</td></tr>
+      <tr><td>Assessment and decisions</td><td>Liability, recommended amount and reserve; approval limits by role; settlement with payment reference; rejection with reason</td><td class="mono">claims</td></tr>
+      <tr><td>Audit trail</td><td>Every status change recorded with who, when and why; shown as a timeline</td><td class="mono">claims</td></tr>
+      <tr><td>Notifications</td><td>In-app notifications for claimants and officers, created from Kafka events, unread badge in the header</td><td class="mono">notification</td></tr>
+      <tr><td>Liability exposure</td><td>Outstanding reserves, paid and incurred amounts by market, claim type, status and age, in local currency and USD</td><td class="mono">claims</td></tr>
+      <tr><td>Workload and performance</td><td>Per officer: open claims by status, SLA breaches, closed in 30 days, average days to close</td><td class="mono">claims</td></tr>
+      <tr><td>Paid against policy</td><td>Settled amounts added to the policy's paid-to-date through Kafka</td><td class="mono">policy</td></tr>
+      <tr><td>Reliability</td><td>Outbox so no event is lost, duplicate-safe consumers, retries and a dead-letter topic, circuit breaker on the coverage call</td><td class="mono">all</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Technology</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Layer</th><th>Choice</th></tr></thead>
+    <tbody>
+      <tr><td>Frontend</td><td>Angular, Native Federation micro-frontends: shell + claimant app + staff app + shared library; Angular Material; signal-based state</td></tr>
+      <tr><td>Edge</td><td>Spring Cloud Gateway, Eureka service discovery</td></tr>
+      <tr><td>Services</td><td>Java 17, Spring Boot 3: identity, policy, claims, notification. Each built and deployed on its own</td></tr>
+      <tr><td>Messaging</td><td>Apache Kafka, topic <code>claims.lifecycle.v1</code> with a JSON Schema contract</td></tr>
+      <tr><td>Data</td><td>PostgreSQL, one database per service, Flyway migrations</td></tr>
+      <tr><td>Quality</td><td>JUnit 5, Mockito, Spring Security tests, Testcontainers, Embedded Kafka; Vitest and Playwright on the frontend</td></tr>
+      <tr><td>Run</td><td>Docker and Docker Compose; one command starts the whole stack</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Deliberately out of scope</h3>
+  <p class="lede">Document and photo uploads, real payment execution, email and SMS (logged stub only), live currency rates, self-registration of claimants. Each is a planned next step, not a gap in the design.</p>
+</section>
+
+<section class="rule">
+  <span class="eyebrow">The one rule behind every decision</span>
+  <div class="rule-grid">
+    <div class="s"><strong>Synchronous REST</strong>Used when the <em>person on the screen</em> needs an answer right now: "Is my claim accepted?", "Did I pick up this claim, or did a colleague get it first?"</div>
+    <div class="a"><strong>Kafka (asynchronous)</strong>Used when <em>other services</em> need to know that something happened, and the user should not wait for them: notifications, policy paid-to-date.</div>
+  </div>
+  <div class="legend">
+    <span class="chip sync">SYNC</span> user waits
+    <span class="chip async">KAFKA</span> after the response
+    <span class="chip ins">INSERT</span><span class="chip upd">UPDATE</span> table written
+    <span class="chip rd">READ</span> table only read
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+  <h2>The cast</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Service</th><th>Database</th><th>Tables</th><th>Role in the flow</th></tr></thead>
+    <tbody>
+      <tr><td>api-gateway</td><td class="mono">—</td><td class="mono">—</td><td>Single entry point. Checks the JWT, adds a correlation id, routes to the right service via Eureka.</td></tr>
+      <tr><td>identity-service</td><td class="mono">identity_db</td><td class="mono">app_user</td><td>Login, issues JWT with user id and role.</td></tr>
+      <tr><td>policy-service</td><td class="mono">policy_db</td><td class="mono">policy, processed_event</td><td>Answers "is this policy valid for this incident?". Tracks how much has been paid against each policy.</td></tr>
+      <tr><td>claims-service</td><td class="mono">claims_db</td><td class="mono">claim, claim_status_history, info_request, assessment, claim_note, outbox_event</td><td>The core. Owns the claim and its state machine. The only service that publishes to Kafka.</td></tr>
+      <tr><td>notification-service</td><td class="mono">notification_db</td><td class="mono">notification, processed_event</td><td>Listens to Kafka, creates in-app notifications for claimants and officers.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="lede">Kafka topic: <code>claims.lifecycle.v1</code>. Message key = claim id, so all events for one claim arrive in order.</p>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+  <h2>Two building blocks used in every write step</h2>
+  <div class="fail">
+    <div><strong>Outbox: the "to-send" tray</strong>
+      <p>claims-service never calls Kafka inside a user request. In the <em>same database transaction</em> as the claim change, it inserts a row into <code>outbox_event</code>. A background job (every 1 second) reads unsent rows, publishes them to Kafka, and sets <code>published_at</code>.</p>
+      <p><b>Why:</b> either both the claim change and the event are saved, or neither. Kafka being down never loses an event and never fails the user's request.</p></div>
+    <div><strong>processed_event: "already handled" list</strong>
+      <p>Kafka can deliver the same message twice (for example after a crash). Each consumer inserts the <code>eventId</code> into its own <code>processed_event</code> table in the same transaction as its business change. If the id is already there, it skips.</p>
+      <p><b>Why:</b> a duplicate never creates two notifications or adds a payment to the policy twice.</p></div>
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+  <h2>Big picture</h2>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  UI[Angular app] -->|REST + JWT| GW[API Gateway]
+  GW --> ID[identity-service]
+  GW --> PS[policy-service]
+  GW --> CS[claims-service]
+  GW --> NS[notification-service]
+  CS -->|sync REST: coverage check| PS
+  CS -->|outbox relay| K[(Kafka claims.lifecycle.v1)]
+  K -->|all events| NS
+  K -->|ClaimSettled| PS
+</pre>
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+  <h2>The steps</h2>
+  <nav class="toc" aria-label="Steps">
+    <a href="#about">About the project</a>
+    <a href="#s1">1 Login</a><a href="#s2">2 Pick policy</a><a href="#s3">3 Report claim</a><a href="#s4">4 Bell</a>
+    <a href="#s5">5 Queue</a><a href="#s6">6 Pick up</a><a href="#s7">7 Ask info</a><a href="#s8">8 Answer</a>
+    <a href="#s9">9 Assess</a><a href="#s10">10 Approve</a><a href="#s11">11 Settle</a><a href="#s12">12 Reject</a>
+    <a href="#s13">13 Track</a><a href="#s14">14 Dashboard</a><a href="#s15">15 Notes</a>
+    <a href="#tables">Table by table</a>
+  </nav>
+</section>
+
+<!-- 1 -->
+<article class="step" id="s1">
+  <div class="step-head"><span class="num">1</span><div class="grow"><h3>Claimant logs in</h3><span class="who">Alice · identity-service</span></div><span class="chip sync">SYNC</span></div>
+  <div class="lanes"><div class="lane s single">
+    <h4>While the user waits</h4>
+    <ol>
+      <li>Browser sends <code>POST /api/auth/login</code> with email and password to the gateway. This is the only public route.</li>
+      <li>Gateway forwards to identity-service, which finds the user and checks the password against the BCrypt hash.</li>
+      <li>identity-service returns a JWT containing user id, name, role <code>CLAIMANT</code> and market <code>SG</code>, valid for 60 minutes.</li>
+      <li>The Angular shell stores the token, reads the role and loads the claimant micro-frontend.</li>
+    </ol>
+    <div class="tables"><div><span class="chip rd">READ</span><code>app_user</code><span class="db">identity_db</span></div></div>
+  </div></div>
+  <div class="why"><b>No Kafka:</b> nothing else in the system cares that someone logged in. From now on every request carries <code>Authorization: Bearer &lt;JWT&gt;</code>; the gateway and each service verify it.</div>
+</article>
+
+<!-- 2 -->
+<article class="step" id="s2">
+  <div class="step-head"><span class="num">2</span><div class="grow"><h3>Claimant opens "Report incident" and picks a policy</h3><span class="who">Alice · policy-service</span></div><span class="chip sync">SYNC</span></div>
+  <div class="lanes"><div class="lane s single">
+    <h4>While the user waits</h4>
+    <ol>
+      <li><code>GET /api/policies/mine</code> → gateway → policy-service.</li>
+      <li>policy-service returns only policies where <code>holder_user_id</code> = the user id from the JWT.</li>
+      <li>The wizard shows "SG-MOTOR-1001 · Motor · valid to 31 Dec 2026".</li>
+    </ol>
+    <div class="tables"><div><span class="chip rd">READ</span><code>policy</code><span class="db">policy_db</span></div></div>
+  </div></div>
+</article>
+
+<!-- 3 -->
+<article class="step" id="s3">
+  <div class="step-head"><span class="num">3</span><div class="grow"><h3>Claimant submits the claim (FNOL)</h3><span class="who">Alice · claims-service → policy-service, then Kafka</span></div><span class="chip sync">SYNC</span><span class="chip async">KAFKA</span></div>
+  <div class="lanes">
+    <div class="lane s">
+      <h4>While the user waits</h4>
+      <ol>
+        <li><code>POST /api/claims</code> with policy number, type MOTOR, incident date, location, description, estimated loss SGD 8,000.</li>
+        <li>claims-service validates the input. Bad input → <span class="chip err">400</span> with field errors.</li>
+        <li><b>Sync call to policy-service:</b> <code>GET /internal/policies/SG-MOTOR-1001/coverage</code>. Checks: policy active, belongs to Alice, incident date inside the policy period, product matches. Returns sum insured, deductible, currency.</li>
+        <li>Not covered → <span class="chip err">422</span> "Incident date is outside the policy period". Policy-service down → circuit breaker → <span class="chip err">503</span>. In both cases nothing is saved.</li>
+        <li>Covered → claims-service works out priority (Strategy rules), SLA due date and initial reserve <code>min(8000, sumInsured) − deductible</code>.</li>
+        <li><b>One database transaction</b> writes three rows, then commits.</li>
+        <li>Returns <span class="chip sync">201</span> with claim number <code>CLM-SG-2026-000124</code>, status SUBMITTED. Alice sees a confirmation.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip rd">READ</span><code>policy</code><span class="db">policy_db (via REST)</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim</code><span class="db">status SUBMITTED, coverage snapshot, reserve</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim_status_history</code><span class="db">— → SUBMITTED</span></div>
+        <div><span class="chip ins">INSERT</span><code>outbox_event</code><span class="db">ClaimSubmitted, published_at = null</span></div>
+      </div>
+    </div>
+    <div class="lane a">
+      <h4>After the response</h4>
+      <ol>
+        <li>Outbox relay picks up the row within about 1 second and publishes <code>ClaimSubmitted</code> to <code>claims.lifecycle.v1</code> (key = claim id).</li>
+        <li>On Kafka acknowledgement, it marks the outbox row as sent.</li>
+        <li><b>notification-service</b> consumes it, checks it has not seen this event id, creates "We received your claim CLM-SG-2026-000124" for Alice.</li>
+        <li><b>policy-service</b> also receives it (same topic, its own consumer group) and ignores it, because it only reacts to <code>ClaimSettled</code>.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>outbox_event</code><span class="db">published_at = now</span></div>
+        <div><span class="chip ins">INSERT</span><code>notification</code><span class="db">notification_db, for Alice</span></div>
+        <div><span class="chip ins">INSERT</span><code>processed_event</code><span class="db">notification_db</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="why"><b>Why the coverage check is synchronous:</b> Alice must know right now whether the claim is accepted; a claim on an expired policy should never be created. <b>Why the coverage is copied onto the claim:</b> later screens and dashboards never need to call policy-service again, so the two services stay loosely coupled.</div>
+</article>
+
+<!-- 4 -->
+<article class="step" id="s4">
+  <div class="step-head"><span class="num">4</span><div class="grow"><h3>Notification bell updates</h3><span class="who">Any user · notification-service</span></div><span class="chip sync">SYNC</span></div>
+  <div class="lanes"><div class="lane s single">
+    <h4>While the user waits</h4>
+    <ol>
+      <li>The shell asks <code>GET /api/notifications/unread-count</code> every 30 seconds and when the browser tab regains focus.</li>
+      <li>Badge shows 1. Opening the bell lists notifications; clicking one calls <code>POST /api/notifications/{id}/read</code>.</li>
+    </ol>
+    <div class="tables">
+      <div><span class="chip rd">READ</span><code>notification</code><span class="db">where recipient = user id from JWT</span></div>
+      <div><span class="chip upd">UPDATE</span><code>notification</code><span class="db">read_at = now (when clicked)</span></div>
+    </div>
+  </div></div>
+  <div class="why"><b>This is how async reaches the screen:</b> Kafka finishes the work in the background; the browser catches up by polling. Server-Sent Events would remove the delay and is the planned next step.</div>
+</article>
+
+<!-- 5 -->
+<article class="step" id="s5">
+  <div class="step-head"><span class="num">5</span><div class="grow"><h3>Officer opens the work queue</h3><span class="who">Olivia (CLAIMS_OFFICER) · claims-service</span></div><span class="chip sync">SYNC</span></div>
+  <div class="lanes"><div class="lane s single">
+    <h4>While the user waits</h4>
+    <ol>
+      <li>Olivia logs in (same as step 1). The shell sees role CLAIMS_OFFICER and loads the staff micro-frontend.</li>
+      <li><code>GET /api/claims/queue?scope=UNASSIGNED&amp;sort=slaDueAt</code>. Filters are built with JPA Specifications (status, market, priority).</li>
+      <li>Alice's claim appears with priority and an SLA chip "due in 2 days".</li>
+    </ol>
+    <div class="tables"><div><span class="chip rd">READ</span><code>claim</code><span class="db">claims_db</span></div></div>
+  </div></div>
+</article>
+
+<!-- 6 -->
+<article class="step" id="s6">
+  <div class="step-head"><span class="num">6</span><div class="grow"><h3>Officer picks up the claim</h3><span class="who">Olivia · claims-service, then Kafka</span></div><span class="chip sync">SYNC</span><span class="chip async">KAFKA</span></div>
+  <div class="lanes">
+    <div class="lane s">
+      <h4>While the user waits</h4>
+      <ol>
+        <li><code>POST /api/claims/{id}/assign</code> with <code>expectedVersion: 0</code>.</li>
+        <li>State machine checks SUBMITTED → UNDER_REVIEW is allowed.</li>
+        <li>One transaction: update the claim only if <code>version</code> is still 0, write history and outbox.</li>
+        <li>If Omar picked it up a moment earlier, the version is now 1 → <span class="chip err">409</span> "This claim was just picked up by someone else". The UI reloads the queue.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>claim</code><span class="db">assigned_officer_id, status UNDER_REVIEW, version 0→1</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim_status_history</code><span class="db">SUBMITTED → UNDER_REVIEW</span></div>
+        <div><span class="chip ins">INSERT</span><code>outbox_event</code><span class="db">ClaimAssigned</span></div>
+      </div>
+    </div>
+    <div class="lane a">
+      <h4>After the response</h4>
+      <ol>
+        <li>Relay publishes <code>ClaimAssigned</code>.</li>
+        <li>notification-service tells Alice "An officer is now reviewing your claim". If a manager assigned it, Olivia also gets "Claim assigned to you".</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>outbox_event</code></div>
+        <div><span class="chip ins">INSERT</span><code>notification</code><span class="db">Alice</span></div>
+        <div><span class="chip ins">INSERT</span><code>processed_event</code></div>
+      </div>
+    </div>
+  </div>
+  <div class="why"><b>Optimistic locking</b> (the <code>version</code> column) is what stops two officers working the same claim, without holding database locks while people think.</div>
+</article>
+
+<!-- 7 -->
+<article class="step" id="s7">
+  <div class="step-head"><span class="num">7</span><div class="grow"><h3>Officer asks the claimant for more information</h3><span class="who">Olivia · claims-service, then Kafka</span></div><span class="chip sync">SYNC</span><span class="chip async">KAFKA</span></div>
+  <div class="lanes">
+    <div class="lane s">
+      <h4>While the user waits</h4>
+      <ol>
+        <li><code>POST /api/claims/{id}/info-requests</code> with "Please provide the police report number".</li>
+        <li>Only the assigned officer may do this. UNDER_REVIEW → INFO_REQUESTED.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip ins">INSERT</span><code>info_request</code><span class="db">status OPEN</span></div>
+        <div><span class="chip upd">UPDATE</span><code>claim</code><span class="db">status INFO_REQUESTED</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim_status_history</code></div>
+        <div><span class="chip ins">INSERT</span><code>outbox_event</code><span class="db">InfoRequested</span></div>
+      </div>
+    </div>
+    <div class="lane a">
+      <h4>After the response</h4>
+      <ol><li>notification-service tells Alice "Action required on CLM-SG-2026-000124".</li></ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>outbox_event</code></div>
+        <div><span class="chip ins">INSERT</span><code>notification</code><span class="db">Alice</span></div>
+        <div><span class="chip ins">INSERT</span><code>processed_event</code></div>
+      </div>
+    </div>
+  </div>
+</article>
+
+<!-- 8 -->
+<article class="step" id="s8">
+  <div class="step-head"><span class="num">8</span><div class="grow"><h3>Claimant answers</h3><span class="who">Alice · claims-service, then Kafka</span></div><span class="chip sync">SYNC</span><span class="chip async">KAFKA</span></div>
+  <div class="lanes">
+    <div class="lane s">
+      <h4>While the user waits</h4>
+      <ol>
+        <li>Alice opens the claim from her notification and types the answer.</li>
+        <li><code>POST /api/claims/{id}/info-requests/{rid}/response</code>. Ownership check: not Alice's claim → <span class="chip err">404</span>.</li>
+        <li>When no open requests remain: INFO_REQUESTED → UNDER_REVIEW.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>info_request</code><span class="db">response, ANSWERED, responded_at</span></div>
+        <div><span class="chip upd">UPDATE</span><code>claim</code><span class="db">status UNDER_REVIEW</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim_status_history</code></div>
+        <div><span class="chip ins">INSERT</span><code>outbox_event</code><span class="db">InfoProvided</span></div>
+      </div>
+    </div>
+    <div class="lane a">
+      <h4>After the response</h4>
+      <ol><li>notification-service tells Olivia (the assigned officer from the event) "Claimant responded".</li></ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>outbox_event</code></div>
+        <div><span class="chip ins">INSERT</span><code>notification</code><span class="db">Olivia</span></div>
+        <div><span class="chip ins">INSERT</span><code>processed_event</code></div>
+      </div>
+    </div>
+  </div>
+</article>
+
+<!-- 9 -->
+<article class="step" id="s9">
+  <div class="step-head"><span class="num">9</span><div class="grow"><h3>Officer records the assessment</h3><span class="who">Olivia · claims-service, then Kafka</span></div><span class="chip sync">SYNC</span><span class="chip async">KAFKA</span></div>
+  <div class="lanes">
+    <div class="lane s">
+      <h4>While the user waits</h4>
+      <ol>
+        <li><code>POST /api/claims/{id}/assessment</code>: liability ACCEPTED, recommended SGD 7,200, reserve SGD 7,200, findings.</li>
+        <li>UNDER_REVIEW → ASSESSED. The reserve is now the claim's outstanding liability.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip ins">INSERT</span><code>assessment</code></div>
+        <div><span class="chip upd">UPDATE</span><code>claim</code><span class="db">reserve_amount 7200, status ASSESSED</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim_status_history</code></div>
+        <div><span class="chip ins">INSERT</span><code>outbox_event</code><span class="db">ClaimAssessed</span></div>
+      </div>
+    </div>
+    <div class="lane a">
+      <h4>After the response</h4>
+      <ol><li>Event is published, but no consumer acts on it today. It is an internal step, so the claimant is not notified.</li></ol>
+      <div class="tables"><div><span class="chip upd">UPDATE</span><code>outbox_event</code></div></div>
+    </div>
+  </div>
+  <div class="why"><b>Why publish an event nobody uses yet:</b> every state change is a fact on the topic. A future analytics or fraud service can subscribe without any change to claims-service.</div>
+</article>
+
+<!-- 10 -->
+<article class="step" id="s10">
+  <div class="step-head"><span class="num">10</span><div class="grow"><h3>Officer approves</h3><span class="who">Olivia (or Maya, manager) · claims-service, then Kafka</span></div><span class="chip sync">SYNC</span><span class="chip async">KAFKA</span></div>
+  <div class="lanes">
+    <div class="lane s">
+      <h4>While the user waits</h4>
+      <ol>
+        <li><code>POST /api/claims/{id}/approve</code> with amount SGD 7,200.</li>
+        <li><b>Authority check</b>: convert to USD (about 5,350). Officer limit is USD 25,000, so allowed. Above the limit → <span class="chip err">403</span> "Requires manager approval"; Maya approves instead.</li>
+        <li>ASSESSED → APPROVED.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>claim</code><span class="db">approved_amount, status APPROVED</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim_status_history</code></div>
+        <div><span class="chip ins">INSERT</span><code>outbox_event</code><span class="db">ClaimApproved</span></div>
+      </div>
+    </div>
+    <div class="lane a">
+      <h4>After the response</h4>
+      <ol><li>notification-service tells Alice "Your claim is approved for SGD 7,200".</li></ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>outbox_event</code></div>
+        <div><span class="chip ins">INSERT</span><code>notification</code><span class="db">Alice</span></div>
+        <div><span class="chip ins">INSERT</span><code>processed_event</code></div>
+      </div>
+    </div>
+  </div>
+</article>
+
+<!-- 11 -->
+<article class="step" id="s11">
+  <div class="step-head"><span class="num">11</span><div class="grow"><h3>Officer records the settlement payment</h3><span class="who">Olivia · claims-service, then Kafka to two consumers</span></div><span class="chip sync">SYNC</span><span class="chip async">KAFKA</span></div>
+  <div class="lanes">
+    <div class="lane s">
+      <h4>While the user waits</h4>
+      <ol>
+        <li><code>POST /api/claims/{id}/settle</code> with payment reference PAY-88231 and amount 7,200.</li>
+        <li>APPROVED → SETTLED. Reserve drops to 0: the liability is no longer outstanding, it is now paid.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>claim</code><span class="db">paid_amount, payment_reference, reserve 0, SETTLED, closed_at</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim_status_history</code></div>
+        <div><span class="chip ins">INSERT</span><code>outbox_event</code><span class="db">ClaimSettled</span></div>
+      </div>
+    </div>
+    <div class="lane a">
+      <h4>After the response</h4>
+      <ol>
+        <li><b>notification-service</b>: "Payment of SGD 7,200 has been made".</li>
+        <li><b>policy-service</b>: in one local transaction, records the event id and adds 7,200 to the policy's <code>paid_to_date</code>.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>outbox_event</code></div>
+        <div><span class="chip ins">INSERT</span><code>notification</code><span class="db">notification_db</span></div>
+        <div><span class="chip ins">INSERT</span><code>processed_event</code><span class="db">notification_db</span></div>
+        <div><span class="chip upd">UPDATE</span><code>policy</code><span class="db">paid_to_date += 7200 (policy_db)</span></div>
+        <div><span class="chip ins">INSERT</span><code>processed_event</code><span class="db">policy_db</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="why"><b>Why Kafka for the policy update:</b> the officer should not wait for, or fail because of, policy-service. A few seconds of delay on paid-to-date is acceptable. This is the clearest example of one event, two independent consumers.</div>
+</article>
+
+<!-- 12 -->
+<article class="step" id="s12">
+  <div class="step-head"><span class="num">12</span><div class="grow"><h3>Alternative endings: reject or withdraw</h3><span class="who">Officer rejects, or claimant withdraws</span></div><span class="chip sync">SYNC</span><span class="chip async">KAFKA</span></div>
+  <div class="lanes">
+    <div class="lane s">
+      <h4>While the user waits</h4>
+      <ol>
+        <li><b>Reject</b> (officer, from UNDER_REVIEW or ASSESSED): <code>POST /reject</code> with reason code and an explanation the claimant will see.</li>
+        <li><b>Withdraw</b> (claimant, from SUBMITTED or INFO_REQUESTED): <code>POST /withdraw</code>.</li>
+        <li>Any other starting state → <span class="chip err">409</span> invalid transition.</li>
+      </ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>claim</code><span class="db">REJECTED or WITHDRAWN, reserve 0, closed_at</span></div>
+        <div><span class="chip ins">INSERT</span><code>claim_status_history</code></div>
+        <div><span class="chip ins">INSERT</span><code>outbox_event</code><span class="db">ClaimRejected / ClaimWithdrawn</span></div>
+      </div>
+    </div>
+    <div class="lane a">
+      <h4>After the response</h4>
+      <ol><li>Rejected → claimant notified with the reason. Withdrawn → assigned officer notified.</li></ol>
+      <div class="tables">
+        <div><span class="chip upd">UPDATE</span><code>outbox_event</code></div>
+        <div><span class="chip ins">INSERT</span><code>notification</code></div>
+        <div><span class="chip ins">INSERT</span><code>processed_event</code></div>
+      </div>
+    </div>
+  </div>
+</article>
+
+<!-- 13 -->
+<article class="step" id="s13">
+  <div class="step-head"><span class="num">13</span><div class="grow"><h3>Claimant tracks the claim</h3><span class="who">Alice · claims-service</span></div><span class="chip sync">SYNC</span></div>
+  <div class="lanes"><div class="lane s single">
+    <h4>While the user waits</h4>
+    <ol>
+      <li><code>GET /api/claims/mine</code> lists her claims. <code>GET /api/claims/{id}</code> and <code>/timeline</code> show a status tracker and history.</li>
+      <li>The claimant view hides internal data: no reserve, no notes, no assessment findings.</li>
+    </ol>
+    <div class="tables">
+      <div><span class="chip rd">READ</span><code>claim</code></div>
+      <div><span class="chip rd">READ</span><code>claim_status_history</code></div>
+      <div><span class="chip rd">READ</span><code>info_request</code></div>
+    </div>
+  </div></div>
+</article>
+
+<!-- 14 -->
+<article class="step" id="s14">
+  <div class="step-head"><span class="num">14</span><div class="grow"><h3>Manager views workload and liability exposure</h3><span class="who">Maya (CLAIMS_MANAGER) · claims-service</span></div><span class="chip sync">SYNC</span></div>
+  <div class="lanes"><div class="lane s single">
+    <h4>While the user waits</h4>
+    <ol>
+      <li><code>GET /api/claims/stats/exposure</code>: outstanding = sum of reserves on open claims; paid = sum of paid on settled; split by market, claim type, status and age, in local currency and USD.</li>
+      <li><code>GET /api/claims/stats/workload</code>: per officer, open claims by status, SLA breaches, closed in the last 30 days, average days to close.</li>
+      <li>Maya can reassign a claim from an overloaded officer (same as step 6, manager version).</li>
+    </ol>
+    <div class="tables"><div><span class="chip rd">READ</span><code>claim</code><span class="db">GROUP BY aggregates</span></div></div>
+  </div></div>
+  <div class="why"><b>Why not a separate reporting service on Kafka:</b> at this scale the numbers are one SQL query on the claims table and are always up to date. A Kafka-fed reporting service is the scale-up path, and the events are already there for it.</div>
+</article>
+
+<!-- 15 -->
+<article class="step" id="s15">
+  <div class="step-head"><span class="num">15</span><div class="grow"><h3>Officer adds an internal note</h3><span class="who">Olivia · claims-service</span></div><span class="chip sync">SYNC</span></div>
+  <div class="lanes"><div class="lane s single">
+    <h4>While the user waits</h4>
+    <ol><li><code>POST /api/claims/{id}/notes</code>. Staff only; never shown to the claimant.</li></ol>
+    <div class="tables"><div><span class="chip ins">INSERT</span><code>claim_note</code></div></div>
+  </div></div>
+  <div class="why"><b>No Kafka and no outbox:</b> the claim status does not change and no other service needs to react. Adding an event here would be noise.</div>
+</article>
+
+<section id="tables" style="display:flex;flex-direction:column;gap:16px;scroll-margin-top:16px">
+  <h2>Table by table: when each table changes</h2>
+  <p class="lede">The same flow seen from the database. Step numbers match the cards above. <span class="chip sync">SYNC</span> means the change is committed before the user gets the response; <span class="chip async">KAFKA</span> means a consumer makes it a moment later.</p>
+
+  <h3>claims_db · <code>claim</code> <span class="lede" style="font-size:.9rem">· one row per claim, only claims-service writes it</span></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Step</th><th>When</th><th>Op</th><th>Columns changed</th></tr></thead>
+    <tbody>
+      <tr><td>3 Submit</td><td><span class="chip sync">SYNC</span></td><td><span class="chip ins">INSERT</span></td><td>id, claim_number, policy_number, claimant_id, claim_type, market, currency, incident_date, incident_location, description, estimated_loss, sum_insured_snapshot, deductible_snapshot, <b>reserve_amount</b> (initial), <b>status = SUBMITTED</b>, priority, sla_due_at, submitted_at, version = 0</td></tr>
+      <tr><td>6 Pick up</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td>assigned_officer_id, <b>status = UNDER_REVIEW</b></td></tr>
+      <tr><td>7 Ask info</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td><b>status = INFO_REQUESTED</b></td></tr>
+      <tr><td>8 Answer</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td><b>status = UNDER_REVIEW</b> (once no request is still open)</td></tr>
+      <tr><td>9 Assess</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td>reserve_amount (officer's figure), <b>status = ASSESSED</b></td></tr>
+      <tr><td>10 Approve</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td>approved_amount, <b>status = APPROVED</b></td></tr>
+      <tr><td>11 Settle</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td>paid_amount, payment_reference, reserve_amount = 0, <b>status = SETTLED</b>, closed_at</td></tr>
+      <tr><td>12 Reject</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td>rejection_reason_code, reserve_amount = 0, <b>status = REJECTED</b>, closed_at</td></tr>
+      <tr><td>12 Withdraw</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td>reserve_amount = 0, <b>status = WITHDRAWN</b>, closed_at</td></tr>
+      <tr><td>5, 13, 14</td><td><span class="chip sync">SYNC</span></td><td><span class="chip rd">READ</span></td><td>queue, claimant tracking, dashboard aggregates</td></tr>
+    </tbody>
+  </table></div>
+  <p class="lede">Every UPDATE also sets <code>updated_at</code> and increases <code>version</code> by 1. That is what makes the second of two simultaneous updates fail with 409.</p>
+
+  <h3>claims_db · <code>claim_status_history</code> <span class="lede" style="font-size:.9rem">· append-only audit trail, never updated or deleted</span></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Step</th><th>When</th><th>Op</th><th>Columns written</th></tr></thead>
+    <tbody>
+      <tr><td>3, 6, 7, 8, 9, 10, 11, 12</td><td><span class="chip sync">SYNC</span></td><td><span class="chip ins">INSERT</span></td><td>claim_id, from_status, to_status, actor_id, actor_role, comment, occurred_at. One row for every status change, in the same transaction as the <code>claim</code> update</td></tr>
+      <tr><td>13</td><td><span class="chip sync">SYNC</span></td><td><span class="chip rd">READ</span></td><td>claimant and officer timeline</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>claims_db · <code>info_request</code></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Step</th><th>When</th><th>Op</th><th>Columns changed</th></tr></thead>
+    <tbody>
+      <tr><td>7 Ask info</td><td><span class="chip sync">SYNC</span></td><td><span class="chip ins">INSERT</span></td><td>claim_id, question, status = OPEN, requested_by, requested_at</td></tr>
+      <tr><td>8 Answer</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td>response, status = ANSWERED, responded_at</td></tr>
+      <tr><td>13</td><td><span class="chip sync">SYNC</span></td><td><span class="chip rd">READ</span></td><td>shown on claim detail</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>claims_db · <code>assessment</code> and <code>claim_note</code></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Table</th><th>Step</th><th>When</th><th>Op</th><th>Columns written</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">assessment</td><td>9 Assess</td><td><span class="chip sync">SYNC</span></td><td><span class="chip ins">INSERT</span></td><td>claim_id, liability, recommended_amount, reserve_amount, findings, assessor_id, assessed_at</td></tr>
+      <tr><td class="mono">claim_note</td><td>15 Note</td><td><span class="chip sync">SYNC</span></td><td><span class="chip ins">INSERT</span></td><td>claim_id, author_id, body, created_at</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>claims_db · <code>outbox_event</code> <span class="lede" style="font-size:.9rem">· the only table changed both sync and async</span></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Step</th><th>When</th><th>Op</th><th>Columns changed</th></tr></thead>
+    <tbody>
+      <tr><td>3, 6, 7, 8, 9, 10, 11, 12</td><td><span class="chip sync">SYNC</span></td><td><span class="chip ins">INSERT</span></td><td>id (becomes eventId), aggregate_id (claim id), event_type, payload (JSON), created_at, published_at = null</td></tr>
+      <tr><td>~1 s later</td><td><span class="chip async">RELAY</span></td><td><span class="chip upd">UPDATE</span></td><td>published_at = now, after Kafka acknowledges the message</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>notification_db · <code>notification</code> and <code>processed_event</code></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Table</th><th>Step</th><th>When</th><th>Op</th><th>Columns changed</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">notification</td><td>3, 6, 7, 8, 10, 11, 12</td><td><span class="chip async">KAFKA</span></td><td><span class="chip ins">INSERT</span></td><td>recipient_user_id, claim_id, claim_number, type, title, message, created_at, read_at = null</td></tr>
+      <tr><td class="mono">processed_event</td><td>same steps</td><td><span class="chip async">KAFKA</span></td><td><span class="chip ins">INSERT</span></td><td>event_id, processed_at. Same local transaction as the notification</td></tr>
+      <tr><td class="mono">notification</td><td>4 Bell</td><td><span class="chip sync">SYNC</span></td><td><span class="chip upd">UPDATE</span></td><td>read_at = now, when the user opens it</td></tr>
+      <tr><td class="mono">notification</td><td>4 Bell</td><td><span class="chip sync">SYNC</span></td><td><span class="chip rd">READ</span></td><td>unread count and list</td></tr>
+    </tbody>
+  </table></div>
+  <p class="lede">Step 9 (<code>ClaimAssessed</code>) has no notification template, so notification-service reads it and writes nothing.</p>
+
+  <h3>policy_db · <code>policy</code> and <code>processed_event</code></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Table</th><th>Step</th><th>When</th><th>Op</th><th>Columns changed</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">policy</td><td>2 Pick policy</td><td><span class="chip sync">SYNC</span></td><td><span class="chip rd">READ</span></td><td>claimant's own policies</td></tr>
+      <tr><td class="mono">policy</td><td>3 Submit</td><td><span class="chip sync">SYNC</span></td><td><span class="chip rd">READ</span></td><td>coverage check called by claims-service</td></tr>
+      <tr><td class="mono">policy</td><td>11 Settle</td><td><span class="chip async">KAFKA</span></td><td><span class="chip upd">UPDATE</span></td><td>paid_to_date += paid amount, version + 1</td></tr>
+      <tr><td class="mono">processed_event</td><td>11 Settle</td><td><span class="chip async">KAFKA</span></td><td><span class="chip ins">INSERT</span></td><td>event_id, processed_at. Same local transaction as the policy update</td></tr>
+    </tbody>
+  </table></div>
+  <p class="lede">Every other event reaches policy-service and is ignored with no write.</p>
+
+  <h3>identity_db · <code>app_user</code></h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Step</th><th>When</th><th>Op</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr><td>1 Login</td><td><span class="chip sync">SYNC</span></td><td><span class="chip rd">READ</span></td><td>email lookup and password check. Users are seeded by a Flyway script; the flow never writes this table</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>One claim row over time</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>After step</th><th>status</th><th>assigned_officer</th><th>reserve</th><th>approved</th><th>paid</th><th>version</th></tr></thead>
+    <tbody>
+      <tr><td>3 Submit</td><td class="mono">SUBMITTED</td><td>—</td><td>7,500</td><td>—</td><td>—</td><td>0</td></tr>
+      <tr><td>6 Pick up</td><td class="mono">UNDER_REVIEW</td><td>Olivia</td><td>7,500</td><td>—</td><td>—</td><td>1</td></tr>
+      <tr><td>7 Ask info</td><td class="mono">INFO_REQUESTED</td><td>Olivia</td><td>7,500</td><td>—</td><td>—</td><td>2</td></tr>
+      <tr><td>8 Answer</td><td class="mono">UNDER_REVIEW</td><td>Olivia</td><td>7,500</td><td>—</td><td>—</td><td>3</td></tr>
+      <tr><td>9 Assess</td><td class="mono">ASSESSED</td><td>Olivia</td><td>7,200</td><td>—</td><td>—</td><td>4</td></tr>
+      <tr><td>10 Approve</td><td class="mono">APPROVED</td><td>Olivia</td><td>7,200</td><td>7,200</td><td>—</td><td>5</td></tr>
+      <tr><td>11 Settle</td><td class="mono">SETTLED</td><td>Olivia</td><td>0</td><td>7,200</td><td>7,200</td><td>6</td></tr>
+    </tbody>
+  </table></div>
+  <p class="lede">Example in SGD: estimated loss 8,000 with a 500 deductible gives an initial reserve of 7,500. Outstanding exposure on the dashboard is the sum of <code>reserve</code> over open claims, so this claim counts 7,500, then 7,200, then 0 once paid.</p>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+  <h2>Summary for one slide</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>#</th><th>Step</th><th>Sync writes</th><th>Kafka event</th><th>Consumers and their writes</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Login</td><td class="none">read only</td><td>—</td><td>—</td></tr>
+      <tr><td>2</td><td>Pick policy</td><td class="none">read only</td><td>—</td><td>—</td></tr>
+      <tr><td>3</td><td>Submit claim</td><td>claim, history, outbox</td><td class="mono">ClaimSubmitted</td><td>notification-service → notification</td></tr>
+      <tr><td>4</td><td>Bell</td><td>notification.read_at</td><td>—</td><td>—</td></tr>
+      <tr><td>5</td><td>Queue</td><td class="none">read only</td><td>—</td><td>—</td></tr>
+      <tr><td>6</td><td>Pick up</td><td>claim, history, outbox</td><td class="mono">ClaimAssigned</td><td>notification-service → notification</td></tr>
+      <tr><td>7</td><td>Ask info</td><td>info_request, claim, history, outbox</td><td class="mono">InfoRequested</td><td>notification-service → notification</td></tr>
+      <tr><td>8</td><td>Answer</td><td>info_request, claim, history, outbox</td><td class="mono">InfoProvided</td><td>notification-service → notification</td></tr>
+      <tr><td>9</td><td>Assess</td><td>assessment, claim, history, outbox</td><td class="mono">ClaimAssessed</td><td>none today</td></tr>
+      <tr><td>10</td><td>Approve</td><td>claim, history, outbox</td><td class="mono">ClaimApproved</td><td>notification-service → notification</td></tr>
+      <tr><td>11</td><td>Settle</td><td>claim, history, outbox</td><td class="mono">ClaimSettled</td><td>notification-service → notification; policy-service → policy.paid_to_date</td></tr>
+      <tr><td>12</td><td>Reject / withdraw</td><td>claim, history, outbox</td><td class="mono">ClaimRejected / ClaimWithdrawn</td><td>notification-service → notification</td></tr>
+      <tr><td>13</td><td>Track</td><td class="none">read only</td><td>—</td><td>—</td></tr>
+      <tr><td>14</td><td>Dashboard</td><td class="none">read only</td><td>—</td><td>—</td></tr>
+      <tr><td>15</td><td>Note</td><td>claim_note</td><td>—</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <p class="lede">Every Kafka step also updates <code>outbox_event.published_at</code> in claims_db and inserts into the consumer's <code>processed_event</code>.</p>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+  <h2>What happens when something breaks</h2>
+  <div class="fail">
+    <div><strong>policy-service is down during step 3</strong><p>Circuit breaker opens after repeated failures. Claimant gets 503 "Please try again shortly". No claim row is created, so there are no half-checked claims.</p></div>
+    <div><strong>Kafka is down</strong><p>Users notice nothing: claims are saved and the response is normal. Events wait in <code>outbox_event</code> with <code>published_at</code> empty. The relay sends them once Kafka is back.</p></div>
+    <div><strong>notification-service is down</strong><p>Events stay in Kafka. When it restarts, it continues from its last committed offset. Notifications arrive late, none are lost.</p></div>
+    <div><strong>Same event delivered twice</strong><p>The second insert into <code>processed_event</code> hits the primary key, so the consumer skips it. No duplicate notification, no double payment on the policy.</p></div>
+    <div><strong>Two officers pick up the same claim</strong><p>The <code>version</code> column lets only the first update succeed. The second officer gets 409 and a refreshed queue.</p></div>
+    <div><strong>A malformed event</strong><p>The consumer retries 3 times with back-off, then moves it to <code>claims.lifecycle.v1.DLT</code> so it does not block the events behind it.</p></div>
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+  <h2>Five lines to say out loud</h2>
+  <div class="talk"><ol>
+    <li>If the user needs an answer now, it is REST; if other services need to know something happened, it is Kafka.</li>
+    <li>The only synchronous service-to-service call is the coverage check, and its result is copied onto the claim so it never has to be repeated.</li>
+    <li>claims-service writes the change and the event in one transaction through the outbox, so the two can never disagree.</li>
+    <li>Events are keyed by claim id for per-claim ordering, and every consumer is idempotent, so redelivery is harmless.</li>
+    <li>Each service owns its database; the only things crossing boundaries are REST contracts and the event schema.</li>
+  </ol></div>
+</section>
+
+</div>
