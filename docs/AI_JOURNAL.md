@@ -117,11 +117,29 @@ Re-verified by rebuilding the images and re-running the smoke test.
 
 ---
 
+## Entry 8 — Developer found a missing business rule: the same incident claimed twice
+
+**Developer asked:** "For one vehicle a claim was approved and the payment processed. If the same vehicle is claimed
+again on the same day, are we handling that?"
+**AI checked the code and answered honestly: only partly.** The remaining sum insured went down after each payment,
+and each approval was capped by the claim's own FNOL snapshot. But nothing compared a new claim with earlier ones.
+The AI also found a second gap I hadn't asked about: two claims open at the same time each saw the full remaining
+cover, so together they could pay out more than the sum insured.
+**AI recommended, and I agreed, not to hard-block "same vehicle, same day"**, because a car can genuinely be hit
+twice. The rule is: same policy and incident date while a claim is open → 409 Duplicate claim; after one was paid →
+accept, flag `possibleDuplicateOf` for staff and triage HIGH; rejected or withdrawn claims are ignored. At approval,
+amounts on all claims on the policy are capped by its full sum insured. Both checks run under a per-policy
+PostgreSQL advisory lock, so concurrent requests cannot both pass (ADR-012).
+**Side effect the AI caught:** several existing tests, the smoke script and the Playwright helper filed claims on
+the same policy and date, and one collided with a seeded open claim. They now use separate dates.
+
+---
+
 ## Verification evidence
 
-- Backend: 121 tests pass (gateway 5, identity 9, policy 15, claims 78, notification 14), on real PostgreSQL and
+- Backend: 131 tests pass (gateway 5, identity 9, policy 15, claims 88, notification 14), on real PostgreSQL and
   embedded Kafka.
 - Frontend: 37 Vitest unit tests pass; 6 Playwright browser tests pass against the full Docker stack.
-- `scripts/e2e-smoke.mjs`: 35 checks pass through the gateway, including both Kafka consumers (notifications and the
+- `scripts/e2e-smoke.mjs`: 38 checks pass through the gateway, including both Kafka consumers (notifications and the
   policy's paid-to-date).
 - Screenshots of every main screen are in `docs/screenshots/`.

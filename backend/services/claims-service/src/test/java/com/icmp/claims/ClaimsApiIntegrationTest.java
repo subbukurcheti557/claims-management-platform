@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -70,6 +71,11 @@ import com.icmp.claims.support.TestTokens;
 class ClaimsApiIntegrationTest {
 
     private static final String TOPIC = "claims.lifecycle.v1";
+
+    /** Seed claim CLM-SG-2026-000009 on SG-MOT-1001 is SETTLED, with an incident 61 days ago. */
+    private static final int SEEDED_PAID_CLAIM_DAYS_AGO = 61;
+
+    private static final AtomicInteger DAYS_AGO = new AtomicInteger(2);
 
     @Autowired
     MockMvc mvc;
@@ -128,9 +134,25 @@ class ClaimsApiIntegrationTest {
         return json.readTree(result.andReturn().getResponse().getContentAsString());
     }
 
+    /**
+     * Each new claim gets its own incident date, so tests do not trip the duplicate-claim rule on one another.
+     * Days 2 and 61 are skipped: the seed data already has claims on SG-MOT-1001 for those incident dates.
+     */
+    private static LocalDate uniqueIncidentDate() {
+        int daysAgo = DAYS_AGO.incrementAndGet();
+        while (daysAgo == 2 || daysAgo == SEEDED_PAID_CLAIM_DAYS_AGO) {
+            daysAgo = DAYS_AGO.incrementAndGet();
+        }
+        return LocalDate.now().minusDays(daysAgo);
+    }
+
     private Map<String, Object> fnol(String estimatedLoss) {
-        return Map.of("policyNumber", "SG-MOT-1001", "claimType", "MOTOR",
-                "incidentDate", LocalDate.now().minusDays(2).toString(), "incidentLocation", "Orchard Road",
+        return fnol("SG-MOT-1001", estimatedLoss, uniqueIncidentDate());
+    }
+
+    private Map<String, Object> fnol(String policyNumber, String estimatedLoss, LocalDate incidentDate) {
+        return Map.of("policyNumber", policyNumber, "claimType", "MOTOR",
+                "incidentDate", incidentDate.toString(), "incidentLocation", "Orchard Road",
                 "description", "Rear-ended at the traffic lights on Orchard Road, bumper and boot damaged.",
                 "injuryReported", false, "estimatedLoss", new BigDecimal(estimatedLoss));
     }
@@ -455,6 +477,84 @@ class ClaimsApiIntegrationTest {
                     .andExpect(jsonPath("$.status").value("WITHDRAWN"))
                     .andExpect(jsonPath("$.allowedActions.length()").value(0));
             postJson("/api/claims/" + id + "/withdraw", TestTokens.bob(), Map.of()).andExpect(status().isNotFound());
+        }
+    }
+
+    // ------------------------------------------------------------------ Duplicates and the policy limit
+
+    @Nested
+    class DuplicatesAndPolicyLimit {
+
+        @Test
+        void sameIncidentWhileTheFirstClaimIsOpenIs409UntilItIsWithdrawn() throws Exception {
+            LocalDate day = uniqueIncidentDate();
+            JsonNode first = body(postJson("/api/claims", TestTokens.alice(), fnol("SG-MOT-1001", "3000", day))
+                    .andExpect(status().isCreated()));
+            String firstNumber = first.get("claimNumber").asText();
+
+            postJson("/api/claims", TestTokens.alice(), fnol("SG-MOT-1001", "3000", day))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.title").value("Duplicate claim"))
+                    .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString(
+                            "Claim " + firstNumber + " for policy SG-MOT-1001 and incident date " + day)));
+
+            // a different day on the same policy is a different incident
+            postJson("/api/claims", TestTokens.alice(), fnol("SG-MOT-1001", "3000", uniqueIncidentDate()))
+                    .andExpect(status().isCreated());
+
+            // once the first claim is withdrawn the incident can be reported again
+            postJson("/api/claims/" + first.get("id").asText() + "/withdraw", TestTokens.alice(), Map.of())
+                    .andExpect(status().isOk());
+            postJson("/api/claims", TestTokens.alice(), fnol("SG-MOT-1001", "3000", day))
+                    .andExpect(status().isCreated());
+        }
+
+        @Test
+        void sameIncidentAsAPaidClaimIsAcceptedButFlaggedForStaff() throws Exception {
+            LocalDate paidIncident = LocalDate.now().minusDays(SEEDED_PAID_CLAIM_DAYS_AGO);
+            String id = body(postJson("/api/claims", TestTokens.alice(), fnol("SG-MOT-1001", "3000", paidIncident))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.possibleDuplicateOf").doesNotExist())).get("id").asText();
+
+            mvc.perform(get("/api/claims/" + id).header("Authorization", bearer(TestTokens.olivia())))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.possibleDuplicateOf").value("CLM-SG-2026-000009"))
+                    .andExpect(jsonPath("$.priority").value("HIGH"));
+            mvc.perform(get("/api/claims/" + id).header("Authorization", bearer(TestTokens.alice())))
+                    .andExpect(jsonPath("$.possibleDuplicateOf").doesNotExist());
+        }
+
+        @Test
+        void approvalsAcrossClaimsCannotTakeThePolicyOverItsSumInsured() throws Exception {
+            // a dedicated policy so other tests' approvals do not count: SGD 10,000 sum insured, nothing paid
+            when(policyCoverage.checkCoverage(eq("SG-MOT-7001"), any(), any(), eq(ClaimType.MOTOR), anyString()))
+                    .thenReturn(Optional.of(new Coverage("SG-MOT-7001", true, List.of(), "SG", "SGD",
+                            new BigDecimal("10000"), new BigDecimal("500"), new BigDecimal("10000"), "Honda Jazz")));
+            String first = assessed("SG-MOT-7001", "6000");
+            String second = assessed("SG-MOT-7001", "6000");
+
+            postJson("/api/claims/" + first + "/approve", TestTokens.olivia(), Map.of("amount", 6000))
+                    .andExpect(status().isOk());
+            // each claim alone is within cover, but together they would pay SGD 12,000
+            postJson("/api/claims/" + second + "/approve", TestTokens.olivia(), Map.of("amount", 6000))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString(
+                            "only SGD 4000.00 of the SGD 10000.00 sum insured is left")));
+            postJson("/api/claims/" + second + "/approve", TestTokens.olivia(), Map.of("amount", 4000))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("APPROVED"));
+        }
+
+        private String assessed(String policyNumber, String amount) throws Exception {
+            String id = body(postJson("/api/claims", TestTokens.alice(),
+                    fnol(policyNumber, amount, uniqueIncidentDate())).andExpect(status().isCreated()))
+                    .get("id").asText();
+            postJson("/api/claims/" + id + "/assign", TestTokens.olivia(), Map.of()).andExpect(status().isOk());
+            postJson("/api/claims/" + id + "/assessment", TestTokens.olivia(), Map.of("liability", "ACCEPTED",
+                    "recommendedAmount", new BigDecimal(amount), "reserveAmount", new BigDecimal(amount),
+                    "findings", "Repair quote checked."))
+                    .andExpect(status().isOk());
+            return id;
         }
     }
 

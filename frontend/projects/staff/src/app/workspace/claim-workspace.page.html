@@ -39,6 +39,15 @@
       </dl>
     </header>
 
+    @if (c.possibleDuplicateOf) {
+      <div class="icmp-banner" data-tone="warning" role="status" data-testid="possible-duplicate">
+        <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
+        <p>
+          <strong>Possible duplicate.</strong> Claim {{ c.possibleDuplicateOf }} on this policy, for the same incident
+          date, has already been paid. Check that this is a separate incident before approving.
+        </p>
+      </div>
+    }
     @if (store.notice()) {
       <div class="icmp-banner" data-tone="success" role="status">
         <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>

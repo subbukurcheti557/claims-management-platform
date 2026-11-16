@@ -80,6 +80,14 @@ public class Claim {
     @Column(name = "deductible_snapshot", nullable = false)
     private BigDecimal deductibleSnapshot;
 
+    /** The policy's full sum insured: the most that all claims on the policy together may pay. */
+    @Column(name = "policy_sum_insured", nullable = false)
+    private BigDecimal policySumInsured;
+
+    /** Set when an already paid claim exists for the same policy and incident date. Staff only. */
+    @Column(name = "possible_duplicate_of")
+    private String possibleDuplicateOf;
+
     @Column(name = "insured_item")
     private String insuredItem;
 
@@ -155,6 +163,19 @@ public class Claim {
     /** First notice of loss: creates a SUBMITTED claim from a coverage-checked report. */
     public static Claim submit(String claimNumber, NewClaim report, CoverageSnapshot coverage, Priority priority,
                                Actor claimant, Instant now) {
+        return submit(claimNumber, report, coverage, priority, claimant, now, null);
+    }
+
+    /**
+     * As {@link #submit(String, NewClaim, CoverageSnapshot, Priority, Actor, Instant)}, for a claim that may repeat
+     * an already paid claim ({@link DuplicateClaimPolicy}). Such a claim is flagged and triaged HIGH, so an officer
+     * looks at it within the shortest SLA.
+     */
+    public static Claim submit(String claimNumber, NewClaim report, CoverageSnapshot coverage, Priority priority,
+                               Actor claimant, Instant now, String possibleDuplicateOf) {
+        if (possibleDuplicateOf != null) {
+            priority = Priority.HIGH;
+        }
         if (!claimant.isClaimant()) {
             throw ClaimRuleException.notPermitted("Only claimants can report a claim.");
         }
@@ -180,6 +201,8 @@ public class Claim {
         c.estimatedLoss = report.estimatedLoss();
         c.sumInsuredSnapshot = coverage.remainingSumInsured();
         c.deductibleSnapshot = coverage.deductible();
+        c.policySumInsured = coverage.policySumInsured();
+        c.possibleDuplicateOf = possibleDuplicateOf;
         c.insuredItem = coverage.insuredItem();
         c.reserveAmount = initialReserve(report.estimatedLoss(), coverage.remainingSumInsured(), coverage.deductible());
         c.status = ClaimStatus.SUBMITTED;
@@ -301,6 +324,16 @@ public class Claim {
     }
 
     public void approve(BigDecimal amount, AuthorityPolicy authority, Actor actor, Instant now) {
+        approve(amount, BigDecimal.ZERO, authority, actor, now);
+    }
+
+    /**
+     * Approves a payment. {@code approvedOnOtherClaims} is what other claims on the same policy have already been
+     * approved or paid; together with this amount it may not exceed the policy's sum insured. This closes the gap
+     * where two claims open at the same time each saw the full remaining cover at FNOL.
+     */
+    public void approve(BigDecimal amount, BigDecimal approvedOnOtherClaims, AuthorityPolicy authority, Actor actor,
+                        Instant now) {
         requireHandler(actor, "approve");
         if (status != ClaimStatus.ASSESSED) {
             throw ClaimRuleException.invalidTransition(status, ClaimStatus.APPROVED, "approve");
@@ -312,6 +345,7 @@ public class Claim {
             throw ClaimRuleException.rule("The approved amount must be greater than zero.");
         }
         requireWithinCover(amount, "approved amount");
+        requireWithinPolicyLimit(amount, approvedOnOtherClaims);
         authority.checkCanApprove(actor, amount, currency);
         transition(ClaimStatus.APPROVED, actor, "Approved for " + currency + " " + amount.toPlainString(), "approve",
                 now);
@@ -442,6 +476,18 @@ public class Claim {
         }
     }
 
+    private void requireWithinPolicyLimit(BigDecimal amount, BigDecimal approvedOnOtherClaims) {
+        BigDecimal others = approvedOnOtherClaims == null ? BigDecimal.ZERO : approvedOnOtherClaims;
+        BigDecimal left = policySumInsured.subtract(others).max(BigDecimal.ZERO);
+        if (amount.compareTo(left) > 0) {
+            throw ClaimRuleException.rule("Other claims on policy " + policyNumber + " have already been approved or"
+                    + " paid " + currency + " " + others.toPlainString() + ", so only " + currency + " "
+                    + left.toPlainString() + " of the " + currency + " " + policySumInsured.toPlainString()
+                    + " sum insured is left. The approved amount of " + currency + " " + amount.toPlainString()
+                    + " is more than that.");
+        }
+    }
+
     private void record(String type, Actor actor, Map<String, Object> data) {
         pendingEvents.add(ClaimDomainEvent.of(type, actor, data));
     }
@@ -518,6 +564,14 @@ public class Claim {
 
     public String getInsuredItem() {
         return insuredItem;
+    }
+
+    public BigDecimal getPolicySumInsured() {
+        return policySumInsured;
+    }
+
+    public String getPossibleDuplicateOf() {
+        return possibleDuplicateOf;
     }
 
     public BigDecimal getReserveAmount() {
@@ -601,6 +655,12 @@ public class Claim {
 
     /** Coverage facts copied from policy-service at FNOL, so the claim never has to ask again. */
     public record CoverageSnapshot(Market market, String currency, BigDecimal remainingSumInsured,
-                                   BigDecimal deductible, String insuredItem) {
+                                   BigDecimal deductible, String insuredItem, BigDecimal policySumInsured) {
+
+        /** For a policy with nothing paid yet: the full sum insured is still remaining. */
+        public CoverageSnapshot(Market market, String currency, BigDecimal remainingSumInsured, BigDecimal deductible,
+                                String insuredItem) {
+            this(market, currency, remainingSumInsured, deductible, insuredItem, remainingSumInsured);
+        }
     }
 }

@@ -39,6 +39,7 @@ public class GlobalExceptionHandler {
             case INVALID_TRANSITION -> build(HttpStatus.CONFLICT, "Action not allowed in current status",
                     ex.getMessage(), null);
             case STALE_VERSION -> build(HttpStatus.CONFLICT, "Concurrent modification", ex.getMessage(), null);
+            case DUPLICATE_CLAIM -> build(HttpStatus.CONFLICT, "Duplicate claim", ex.getMessage(), null);
             case NOT_PERMITTED -> build(HttpStatus.FORBIDDEN, "Not permitted", ex.getMessage(), null);
             case RULE_VIOLATION -> build(HttpStatus.UNPROCESSABLE_ENTITY, "Business rule violated",
                     ex.getMessage(), null);

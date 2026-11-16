@@ -218,7 +218,7 @@ from A3.
 
 **Do:** as Alice, go to **Report an incident**:
 1. Policy: **SG-MOT-1001**.
-2. Incident date: 2 days ago. Location: `Orchard Road`.
+2. Incident date: **3 days ago**. Location: `Orchard Road`. (Not 2 days ago: seeded claim CLM-SG-2026-000001 is already open for that date, see test 4b.)
 3. Description: `Rear-ended at the traffic lights, bumper damaged`.
 4. Injury: **No**. Estimated loss: **8000**.
 5. Review, then submit.
@@ -241,7 +241,7 @@ from A3.
 
 **Why**, step by step:
 1. **Synchronous:** claims-service calls policy-service `GET /internal/policies/SG-MOT-1001/coverage`. It checks that
-   the policy is Alice's, active on the incident date, and that the loss is within the remaining sum insured.
+   the policy is Alice's, active on the incident date, for a motor claim, and that some sum insured is left.
 2. claims-service sets the triage priority and the reserve, then, in **one database transaction**, inserts `claim`,
    `claim_status_history` and `outbox_event`.
 3. The response goes back to the browser. Alice sees her claim at once, without waiting for Kafka.
@@ -276,6 +276,29 @@ They are covered by `PolicyTest`, the integration tests and `scripts/e2e-smoke.m
 - The coverage check is synchronous **because** the claimant needs the answer immediately.
 - The API returns **422** (business rule failed) as a ProblemDetail JSON body. Press F12 and open **Network** to see it.
 - No transaction is opened, so nothing is saved and no event is sent.
+
+---
+
+### Test 4b — The same incident reported twice (409 Duplicate claim)
+
+**Do:** as Alice, report a claim on **SG-MOT-1001** with incident date **2 days ago**, any location and description,
+estimated loss 2000.
+
+**See:** "Claim CLM-SG-2026-000001 for policy SG-MOT-1001 and incident date … is already being handled (status
+SUBMITTED). Please follow that claim instead of reporting the incident again." The claim is not created.
+
+**Check:** Q1 and Q3 show no new rows. In F12 → Network the response is **409** with title `Duplicate claim`.
+
+**Why:**
+- The rule is "same policy + same incident date". The policy identifies the vehicle (or property), and only its
+  holder can claim on it.
+- While a claim for that incident is still **open** (Submitted to Approved), a second one is refused, because the
+  first claim is already handling it.
+- If the earlier claim was **rejected or withdrawn**, the incident can be reported again.
+- If the earlier claim was **paid**, a new claim is accepted but flagged (test 11b), because a car can genuinely be
+  damaged twice in one day.
+- The check runs inside the FNOL transaction under a per-policy lock (`pg_advisory_xact_lock`), so a double-click
+  cannot create two claims.
 
 ---
 
@@ -428,6 +451,34 @@ object `Claim`, not in the controller.
   consumer group, so each gets its own copy.
 - claims-service doesn't know or care who listens.
 - If policy-service is down, the event waits in Kafka and is applied when the service comes back (test 20).
+
+---
+
+### Test 11b — A new claim for an incident that was already paid is flagged
+
+**Do:** as Alice, report another claim on **SG-MOT-1001** with the **same incident date as test 3** (3 days ago),
+estimated loss 1500. Then sign in as Olivia and open the work queue.
+
+**See:**
+- Alice: the claim is accepted as usual. She is not told about the flag.
+- Olivia: the new claim shows **Possible duplicate** in the queue and has priority **High**. On the claim page, a
+  warning banner names the paid claim from test 3.
+
+**Check:** Q1. The new row has `possible_duplicate_of` = the test 3 claim number, `priority=HIGH`, and `sla_due_at` =
+now + 7 days.
+
+**Why:**
+- A second accident on the same day is possible, so the claim is not refused. Instead, an officer must check it
+  before paying.
+- The flag is staff-only, so the API leaves it out of the claimant's view.
+
+**Payout limit across claims:** when a claim is approved, the amounts already approved or paid on the policy's
+other claims, plus this one, may not exceed the policy's full sum insured. If they would, the API returns 422 with
+how much is left. This matters when two claims on one policy are open at the same time, because both saw the same
+remaining cover when they were reported. It is hard to set up by hand, so it is covered by
+`ClaimsApiIntegrationTest.approvalsAcrossClaimsCannotTakeThePolicyOverItsSumInsured`.
+
+Withdraw this claim as Alice afterwards, if you want the later tests to match the numbers in this guide.
 
 ---
 

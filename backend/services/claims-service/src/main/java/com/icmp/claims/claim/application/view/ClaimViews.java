@@ -24,7 +24,7 @@ public final class ClaimViews {
                                int openInfoRequests, long version,
                                // staff only
                                String claimantName, String priority, BigDecimal reserveAmount, Instant slaDueAt,
-                               Boolean overdue, UUID assignedOfficerId) {
+                               Boolean overdue, UUID assignedOfficerId, String possibleDuplicateOf) {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -40,7 +40,8 @@ public final class ClaimViews {
                               UUID claimantId, String claimantName, UUID assignedOfficerId, String priority,
                               Instant slaDueAt, Boolean overdue, BigDecimal reserveAmount, BigDecimal sumInsured,
                               BigDecimal deductible, BigDecimal maxPayable, BigDecimal estimatedLossUsd,
-                              AssessmentView latestAssessment, List<AssessmentView> assessments, Long noteCount) {
+                              AssessmentView latestAssessment, List<AssessmentView> assessments, Long noteCount,
+                              String possibleDuplicateOf) {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

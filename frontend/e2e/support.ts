@@ -60,17 +60,33 @@ export class Api {
     return res.json();
   }
 
+  /**
+   * Reports a claim on SG-MOT-1001. A second open claim for the same incident date is refused with 409
+   * (duplicate rule), and tests run in parallel, so each claim gets a random past date and retries on 409.
+   * Days 2 and 61 hold seeded claims, and the policy started 200 days ago.
+   */
   async reportClaim(estimatedLoss = 3200): Promise<{ id: string; claimNumber: string }> {
-    const incidentDate = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-    return this.post('/api/claims', {
-      policyNumber: 'SG-MOT-1001',
-      claimType: 'MOTOR',
-      incidentDate,
-      incidentLocation: 'Bukit Timah Road',
-      description: 'Side mirror knocked off by a passing lorry while parked. Door scratched too.',
-      injuryReported: false,
-      estimatedLoss,
-    });
+    for (let attempt = 0; attempt < 10; attempt++) {
+      let daysAgo = 3 + Math.floor(Math.random() * 150);
+      if (daysAgo === 61) daysAgo = 62;
+      const incidentDate = new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
+      const res = await this.ctx.post('/api/claims', {
+        headers: this.headers(),
+        data: {
+          policyNumber: 'SG-MOT-1001',
+          claimType: 'MOTOR',
+          incidentDate,
+          incidentLocation: 'Bukit Timah Road',
+          description: 'Side mirror knocked off by a passing lorry while parked. Door scratched too.',
+          injuryReported: false,
+          estimatedLoss,
+        },
+      });
+      if (res.status() === 409) continue;
+      expect(res.ok(), `/api/claims -> ${res.status()} ${await res.text()}`).toBeTruthy();
+      return res.json();
+    }
+    throw new Error('Could not find a free incident date for a test claim');
   }
 
   async dispose(): Promise<void> {

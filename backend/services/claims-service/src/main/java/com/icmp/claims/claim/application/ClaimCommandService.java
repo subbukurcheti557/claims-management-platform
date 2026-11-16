@@ -1,9 +1,12 @@
 package com.icmp.claims.claim.application;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -34,6 +37,8 @@ import com.icmp.claims.claim.domain.AuthorityPolicy;
 import com.icmp.claims.claim.domain.Claim;
 import com.icmp.claims.claim.domain.ClaimDomainEvent;
 import com.icmp.claims.claim.domain.ClaimNote;
+import com.icmp.claims.claim.domain.ClaimStatus;
+import com.icmp.claims.claim.domain.DuplicateClaimPolicy;
 import com.icmp.claims.claim.domain.CurrencyConverter;
 import com.icmp.claims.claim.domain.Market;
 import com.icmp.claims.claim.domain.Priority;
@@ -52,6 +57,9 @@ import com.icmp.claims.common.security.CurrentUser;
 public class ClaimCommandService {
 
     private static final Logger log = LoggerFactory.getLogger(ClaimCommandService.class);
+
+    /** Claims whose approved amount counts against the policy's sum insured. */
+    private static final Set<ClaimStatus> APPROVED_OR_PAID = EnumSet.of(ClaimStatus.APPROVED, ClaimStatus.SETTLED);
 
     private final ClaimRepository claims;
     private final ClaimNoteRepository notes;
@@ -106,17 +114,25 @@ public class ClaimCommandService {
         Claim.NewClaim report = new Claim.NewClaim(cmd.policyNumber(), cmd.claimType(), cmd.incidentDate(),
                 cmd.incidentLocation(), cmd.description(), cmd.injuryReported(), cmd.estimatedLoss());
         Claim.CoverageSnapshot snapshot = new Claim.CoverageSnapshot(market, coverage.currency(),
-                coverage.remainingSumInsured(), coverage.deductible(), coverage.insuredItem());
-        // 3. one transaction: claim + history + outbox
+                coverage.remainingSumInsured(), coverage.deductible(), coverage.insuredItem(), coverage.sumInsured());
+        // 3. one transaction: duplicate check + claim + history + outbox, serialised per policy
         return tx.execute(status -> {
+            claims.lockPolicy(cmd.policyNumber());
+            String possibleDuplicateOf = DuplicateClaimPolicy.check(cmd.policyNumber(), cmd.incidentDate(),
+                    claims.findByPolicyNumberAndIncidentDate(cmd.policyNumber(), cmd.incidentDate())).orElse(null);
             Instant now = Instant.now(clock);
             String number = "CLM-%s-%d-%06d".formatted(market.name(), now.atZone(ZoneOffset.UTC).getYear(),
                     claims.nextClaimSequence());
-            Claim claim = Claim.submit(number, report, snapshot, priority, claimant, now);
+            Claim claim = Claim.submit(number, report, snapshot, priority, claimant, now, possibleDuplicateOf);
             List<ClaimDomainEvent> events = claim.pullEvents();
             claims.saveAndFlush(claim);
             outbox.append(claim, events);
-            log.info("Claim {} submitted on policy {} with priority {}", number, cmd.policyNumber(), priority);
+            if (possibleDuplicateOf != null) {
+                log.warn("Claim {} on policy {} flagged as a possible duplicate of paid claim {}", number,
+                        cmd.policyNumber(), possibleDuplicateOf);
+            }
+            log.info("Claim {} submitted on policy {} with priority {}", number, cmd.policyNumber(),
+                    claim.getPriority());
             return mapper.detail(claim, false, 0);
         });
     }
@@ -163,8 +179,12 @@ public class ClaimCommandService {
     }
 
     public ClaimDetail approve(Approve cmd, CurrentUser user) {
-        return changeAsStaff(cmd.claimId(), cmd.expectedVersion(), user,
-                claim -> claim.approve(cmd.amount(), authorityPolicy, actor(user), now()));
+        return changeAsStaff(cmd.claimId(), cmd.expectedVersion(), user, claim -> {
+            claims.lockPolicy(claim.getPolicyNumber());
+            BigDecimal approvedOnOthers = claims.sumApprovedOnOtherClaims(claim.getPolicyNumber(), claim.getId(),
+                    APPROVED_OR_PAID);
+            claim.approve(cmd.amount(), approvedOnOthers, authorityPolicy, actor(user), now());
+        });
     }
 
     public ClaimDetail settle(Settle cmd, CurrentUser user) {

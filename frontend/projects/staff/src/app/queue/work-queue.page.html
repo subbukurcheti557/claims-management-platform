@@ -129,6 +129,11 @@
           <td mat-cell *matCellDef="let c">
             <a class="num" [routerLink]="['..', 'claims', c.id]" (click)="$event.stopPropagation()">{{ c.claimNumber }}</a>
             <span class="sub">{{ c.claimType | enumLabel }} · {{ c.incidentDate | date: 'd MMM' }}</span>
+            @if (c.possibleDuplicateOf) {
+              <span class="dup" [attr.title]="'Same incident as paid claim ' + c.possibleDuplicateOf">
+                <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>Possible duplicate
+              </span>
+            }
           </td>
         </ng-container>
         <ng-container matColumnDef="claimant">

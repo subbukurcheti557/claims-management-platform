@@ -62,6 +62,21 @@ class ClaimTest {
         }
 
         @Test
+        void possibleDuplicateIsFlaggedAndTriagedHigh() {
+            Claim repeat = Claim.submit("CLM-SG-2026-000101",
+                    new Claim.NewClaim("SG-MOT-1001", ClaimType.MOTOR, LocalDate.of(2026, 11, 10), "Orchard Road",
+                            "Rear-ended at the traffic lights", false, new BigDecimal("8000")),
+                    new Claim.CoverageSnapshot(Market.SG, "SGD", new BigDecimal("52800"), new BigDecimal("500"), "Car",
+                            new BigDecimal("60000")),
+                    Priority.LOW, ALICE, NOW, "CLM-SG-2026-000100");
+            assertThat(repeat.getPossibleDuplicateOf()).isEqualTo("CLM-SG-2026-000100");
+            assertThat(repeat.getPriority()).isEqualTo(Priority.HIGH);
+            assertThat(repeat.getSlaDueAt()).isEqualTo(NOW.plus(Priority.HIGH.sla()));
+            assertThat(repeat.getPolicySumInsured()).isEqualByComparingTo("60000");
+            assertThat(claim.getPossibleDuplicateOf()).isNull();
+        }
+
+        @Test
         void initialReserveIsCappedBySumInsuredAndNeverNegative() {
             assertThat(Claim.initialReserve(new BigDecimal("90000"), new BigDecimal("60000"), new BigDecimal("500")))
                     .isEqualByComparingTo("59500");
@@ -286,6 +301,20 @@ class ClaimTest {
             assertThat(claim.getReserveAmount()).isEqualByComparingTo("5000");
             assertThat(claim.getAssessments()).hasSize(2);
             assertThat(claim.latestAssessment()).get().extracting(Assessment::getFindings).isEqualTo("second");
+        }
+
+        @Test
+        void approvalIsCappedByWhatOtherClaimsOnThePolicyAlreadyUsed() {
+            // sum insured SGD 60,000; another claim on the same policy is already approved for SGD 55,000
+            claim.assess(Liability.ACCEPTED, new BigDecimal("7200"), new BigDecimal("7200"), "ok", OLIVIA, NOW);
+            assertThatThrownBy(() -> claim.approve(new BigDecimal("7200"), new BigDecimal("55000"), AUTHORITY,
+                    OLIVIA, NOW))
+                    .hasMessageContaining("only SGD 5000 of the SGD 60000 sum insured is left")
+                    .extracting("kind").isEqualTo(Kind.RULE_VIOLATION);
+            assertThat(claim.getStatus()).isEqualTo(ClaimStatus.ASSESSED);
+
+            claim.approve(new BigDecimal("5000"), new BigDecimal("55000"), AUTHORITY, OLIVIA, NOW);
+            assertThat(claim.getApprovedAmount()).isEqualByComparingTo("5000");
         }
 
         @Test

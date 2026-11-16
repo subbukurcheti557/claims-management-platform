@@ -16,7 +16,7 @@
         "tags": [
           "Claims - claimant"
         ],
-        "summary": "Report an incident (FNOL). Synchronously checks policy coverage.",
+        "summary": "Report an incident (FNOL). Synchronously checks policy coverage. 409 Duplicate claim when an open claim exists for the same policy and incident date.",
         "operationId": "submit",
         "requestBody": {
           "content": {
@@ -998,6 +998,10 @@
           "noteCount": {
             "type": "integer",
             "format": "int64"
+          },
+          "possibleDuplicateOf": {
+            "type": "string",
+            "description": "Staff only. Claim number of an already paid claim for the same policy and incident date."
           }
         }
       },
@@ -1544,6 +1548,10 @@
           "assignedOfficerId": {
             "type": "string",
             "format": "uuid"
+          },
+          "possibleDuplicateOf": {
+            "type": "string",
+            "description": "Staff only. Claim number of an already paid claim for the same policy and incident date."
           }
         }
       },

@@ -14,7 +14,9 @@ public class ClaimRuleException extends RuntimeException {
         /** The actor may not perform this action on this claim (403). */
         NOT_PERMITTED,
         /** The caller's view of the claim is out of date (409). */
-        STALE_VERSION
+        STALE_VERSION,
+        /** The same incident on the same policy is already being handled by another claim (409). */
+        DUPLICATE_CLAIM
     }
 
     private final Kind kind;

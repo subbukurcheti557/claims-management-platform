@@ -127,7 +127,7 @@ stateDiagram-v2
 
 Implemented as a pure-Java `ClaimStatus` enum with an allowed-transition table plus guard methods on the `Claim` aggregate
 (**State pattern**). Rule failures throw `ClaimRuleException` with a kind that the web layer maps to HTTP:
-`INVALID_TRANSITION` / `STALE_VERSION` → 409, `NOT_PERMITTED` → 403, `RULE_VIOLATION` → 422.
+`INVALID_TRANSITION` / `STALE_VERSION` / `DUPLICATE_CLAIM` → 409, `NOT_PERMITTED` → 403, `RULE_VIOLATION` → 422.
 `ClaimStatusTest` checks all 64 status pairs against the table.
 
 Further rules enforced by the aggregate: only the assigned officer or a manager may act; amounts cannot exceed
@@ -135,6 +135,19 @@ sum insured − deductible; a DENIED assessment must recommend 0 and cannot be a
 when *all* open questions are answered; withdrawing cancels open questions.
 
 **Authority limits** (configurable): `CLAIMS_OFFICER` may approve up to the USD-equivalent of 25,000; above that only `CLAIMS_MANAGER`.
+
+**Duplicate claims and the policy-wide limit** (`DuplicateClaimPolicy`, ADR-012):
+
+| Situation at FNOL (same policy, same incident date) | Result |
+|---|---|
+| Another claim is still open (SUBMITTED … APPROVED) | **409 Duplicate claim**, naming that claim |
+| Another claim was already paid (SETTLED) | Accepted, flagged `possibleDuplicateOf` (staff only) and triaged HIGH |
+| Earlier claims were rejected or withdrawn | Ignored, accepted normally |
+
+At **approval**, what other claims on the policy have been approved or paid plus this amount may not exceed the
+policy's full sum insured (`policy_sum_insured`, copied at FNOL); otherwise 422. Each claim's FNOL snapshot alone is
+not enough, because two claims open at the same time both see the same remaining cover. Both checks run under a
+PostgreSQL advisory lock per policy (`pg_advisory_xact_lock`), so two concurrent requests cannot both pass.
 
 ### 4.2 Entities
 
@@ -330,7 +343,7 @@ sequenceDiagram
   UI->>GW: poll /api/notifications/unread-count (30s) → bell badge
 ```
 
-Failure paths: policy inactive / outside period → **422** with field-level problem detail; policy-service down → circuit open → **503** "try again shortly" (claim **not** created — ADR-004: we refuse rather than create unverified claims).
+Failure paths: an open claim already exists for the same policy and incident date → **409 Duplicate claim**; policy inactive / outside period → **422** with field-level problem detail; policy-service down → circuit open → **503** "try again shortly" (claim **not** created — ADR-004: we refuse rather than create unverified claims).
 
 ### 8.2 Officer pickup → info request → assessment → decision
 
@@ -522,3 +535,4 @@ frontend/projects/
 | 009 | Transactional outbox | direct `kafkaTemplate.send` in TX (dual-write inconsistency) |
 | 010 | Independent Maven projects per service, cross-cutting code copied, events shared as JSON Schema | multi-module build with shared `platform-commons` / `event-contracts` jars (couples releases) |
 | 011 | Integration tests on real PostgreSQL (Testcontainers) and embedded Kafka | H2 (would hide PostgreSQL-specific SQL such as `jsonb`, sequences, partial indexes) |
+| 012 | Same policy + incident date: refuse (409) while a claim is open, flag for review once one is paid; cap approvals across all claims on the policy, under a per-policy advisory lock | hard block on any second claim that day (a car can be hit twice); unique DB constraint (cannot express "open only" plus the paid-claim flag); trusting policy-service paid-to-date at approval (updated asynchronously, so too late) |

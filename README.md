@@ -134,10 +134,10 @@ cd frontend && npm ci && npm run start:all                 # shell :4200 + remot
 | api-gateway | 5 | 401 without/forged token, `/internal/**` blocked, CORS preflight, health |
 | identity-service | 9 | Login, token claims, same 401 for wrong password and unknown user, validation, role rules |
 | policy-service | 15 | Coverage rules; ClaimSettled applied once even when delivered twice; malformed event → DLT |
-| claims-service | 78 | All 64 status pairs of the state machine; aggregate rules; triage; circuit breaker (404 is not a failure, 5xx opens the circuit); full HTTP lifecycle with all 7 events checked on Kafka in order; 409 on concurrent pick-up; authority limit; access rules; dashboard totals |
+| claims-service | 88 | All 64 status pairs of the state machine; aggregate rules; duplicate-claim rule and policy-wide payout limit; triage; circuit breaker (404 is not a failure, 5xx opens the circuit); full HTTP lifecycle with all 7 events checked on Kafka in order; 409 on concurrent pick-up; authority limit; access rules; dashboard totals |
 | notification-service | 14 | Who is notified for each event; exactly once per event; users only see their own |
 | Frontend unit (Vitest) | 37 | Auth store, interceptor and guards; pipes; chips; every feature store; action panel rules |
-| API smoke (`scripts/e2e-smoke.mjs`) | 35 checks | The whole business flow through the gateway against the running stack, including both Kafka consumers |
+| API smoke (`scripts/e2e-smoke.mjs`) | 38 checks | The whole business flow through the gateway against the running stack, including both Kafka consumers |
 | Browser e2e (Playwright) | 6 | Claimant wizard; officer lifecycle to payment; authority limit; manager dashboard; access; theme |
 
 Backend integration tests use real PostgreSQL 16 (Testcontainers) and an embedded Kafka broker, so Docker must be running.

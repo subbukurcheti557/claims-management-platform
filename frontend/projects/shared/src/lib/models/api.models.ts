@@ -122,6 +122,8 @@ export interface ClaimSummary {
   slaDueAt?: string;
   overdue?: boolean;
   assignedOfficerId?: string;
+  /** Claim number of an already paid claim for the same policy and incident date. */
+  possibleDuplicateOf?: string;
 }
 
 export interface InfoRequest {
@@ -186,6 +188,8 @@ export interface ClaimDetail {
   latestAssessment?: Assessment;
   assessments?: Assessment[];
   noteCount?: number;
+  /** Claim number of an already paid claim for the same policy and incident date. */
+  possibleDuplicateOf?: string;
 }
 
 export interface TimelineEntry {

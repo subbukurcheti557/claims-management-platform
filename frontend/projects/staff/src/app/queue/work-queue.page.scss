@@ -82,6 +82,20 @@
   color: var(--icmp-muted);
 }
 
+.dup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--icmp-tone-warning-fg);
+
+  .material-symbols-outlined {
+    font-size: 14px;
+  }
+}
+
 .mkt {
   font: 500 0.8125rem var(--icmp-font-mono);
   padding: 2px 6px;

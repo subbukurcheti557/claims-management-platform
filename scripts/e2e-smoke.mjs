@@ -96,7 +96,8 @@ expect(policiesBefore.status === 200 && policiesBefore.body.length >= 2, `claima
 const paidBefore = Number(policiesBefore.body.find((p) => p.policyNumber === 'SG-MOT-1001').paidToDate);
 
 const today = new Date();
-const incidentDate = new Date(today.getTime() - 2 * 86400000).toISOString().slice(0, 10);
+// 3 days ago: the seed data already has an open claim on SG-MOT-1001 for 2 days ago (duplicate rule → 409)
+const incidentDate = new Date(today.getTime() - 3 * 86400000).toISOString().slice(0, 10);
 const fnol = await call('POST', '/api/claims', alice, {
   policyNumber: 'SG-MOT-1001', claimType: 'MOTOR', incidentDate, incidentLocation: 'Orchard Road, Singapore',
   description: 'Rear-ended at the traffic lights on Orchard Road. Bumper and boot lid damaged.',
@@ -116,6 +117,12 @@ const foreign = await call('POST', '/api/claims', alice, {
   description: 'Testing a claim against somebody else’s policy that must be refused.', injuryReported: false, estimatedLoss: 500,
 });
 expect(foreign.status === 404, 'claim on another person’s policy is refused with 404');
+const repeatWhileOpen = await call('POST', '/api/claims', alice, {
+  policyNumber: 'SG-MOT-1001', claimType: 'MOTOR', incidentDate, incidentLocation: 'Orchard Road, Singapore',
+  description: 'Reporting the same rear-end collision a second time by mistake.', injuryReported: false, estimatedLoss: 8000,
+});
+expect(repeatWhileOpen.status === 409 && repeatWhileOpen.body?.detail?.includes(claim.claimNumber),
+  `same incident while ${claim.claimNumber} is open is refused with 409 "Duplicate claim"`, repeatWhileOpen.body);
 
 await notificationFor(alice, claim.claimNumber, 'Claim received');
 ok('Kafka: ClaimSubmitted reached notification-service → claimant notified');
@@ -169,6 +176,16 @@ await waitFor('policy paid-to-date to include the payment', async () => {
   return Number(p.body.paidToDate) === paidBefore + 7200;
 });
 ok(`Kafka: ClaimSettled → policy-service raised paid-to-date ${paidBefore} → ${paidBefore + 7200}`);
+
+const repeatAfterPaid = await call('POST', '/api/claims', alice, {
+  policyNumber: 'SG-MOT-1001', claimType: 'MOTOR', incidentDate, incidentLocation: 'Orchard Road, Singapore',
+  description: 'A second collision on the same day, in the car park after the first one.', injuryReported: false, estimatedLoss: 1500,
+});
+expect(repeatAfterPaid.status === 201, `same incident date after payment is accepted as ${repeatAfterPaid.body?.claimNumber}`);
+const repeatStaff = await call('GET', `/api/claims/${repeatAfterPaid.body.id}`, olivia);
+expect(repeatStaff.body.possibleDuplicateOf === claim.claimNumber && repeatStaff.body.priority === 'HIGH',
+  `…but flagged for staff as a possible duplicate of ${claim.claimNumber} and triaged HIGH`, repeatStaff.body);
+await call('POST', `/api/claims/${repeatAfterPaid.body.id}/withdraw`, alice, { reason: 'Smoke test clean-up' });
 
 const timeline = await call('GET', `/api/claims/${claim.id}/timeline`, alice);
 expect(timeline.body.map((t) => t.toStatus).join('>') === 'SUBMITTED>UNDER_REVIEW>INFO_REQUESTED>UNDER_REVIEW>ASSESSED>APPROVED>SETTLED',

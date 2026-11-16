@@ -44,7 +44,8 @@ public class ClaimViewMapper {
                 staffView ? c.getReserveAmount() : null,
                 staffView ? c.getSlaDueAt() : null,
                 staffView ? c.isOverdue(now) : null,
-                staffView ? c.getAssignedOfficerId() : null);
+                staffView ? c.getAssignedOfficerId() : null,
+                staffView ? c.getPossibleDuplicateOf() : null);
     }
 
     public ClaimDetail detail(Claim c, boolean staffView, long noteCount) {
@@ -72,7 +73,8 @@ public class ClaimViewMapper {
                 staffView ? converter.toUsd(c.getEstimatedLoss(), c.getCurrency()) : null,
                 staffView ? c.latestAssessment().map(ClaimViewMapper::assessment).orElse(null) : null,
                 staffView ? assessments : null,
-                staffView ? noteCount : null);
+                staffView ? noteCount : null,
+                staffView ? c.getPossibleDuplicateOf() : null);
     }
 
     public List<TimelineEntry> timeline(Claim c) {
