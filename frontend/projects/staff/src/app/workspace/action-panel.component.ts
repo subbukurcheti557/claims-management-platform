@@ -50,6 +50,8 @@ export class ActionPanelComponent {
   readonly isManager = input(false);
   readonly staff = input<StaffMember[]>([]);
   readonly busy = input<WorkspaceAction | null>(null);
+  /** Damage photos on the claim; null while unknown. Approval needs at least one (claims-service enforces it). */
+  readonly damagePhotos = input<number | null>(null);
 
   readonly assign = output<string | undefined>();
   readonly requestInfo = output<string>();
@@ -92,6 +94,7 @@ export class ActionPanelComponent {
   /** USD equivalent of the approve amount, using the claim's own estimate conversion. */
   protected readonly approveUsd = signal(0);
   protected readonly overLimit = computed(() => !this.isManager() && this.approveUsd() > OFFICER_LIMIT_USD);
+  protected readonly noPhotos = computed(() => this.damagePhotos() === 0);
 
   constructor() {
     // When the claim changes (after a command), reset forms to sensible defaults and pick the next step.

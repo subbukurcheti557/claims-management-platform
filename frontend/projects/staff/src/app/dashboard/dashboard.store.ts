@@ -1,11 +1,36 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { ClaimsApi, Exposure, Market, Workload, errorMessage } from '@icmp/shared';
 import { forkJoin } from 'rxjs';
 
-/** Manager dashboard state: liability exposure and team workload, optionally for one market. */
+/**
+ * Manager dashboard state: liability exposure and team workload, optionally for one market. Refreshes every 30 s and
+ * when the browser tab regains focus, so new claims and decisions show up without a reload.
+ */
 @Injectable()
 export class DashboardStore {
+  static readonly REFRESH_MS = 30_000;
+
   private readonly api = inject(ClaimsApi);
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly onFocus = () => this.load();
+
+  readonly lastUpdated = signal<Date | null>(null);
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.stopAutoRefresh());
+  }
+
+  startAutoRefresh(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => this.load(), DashboardStore.REFRESH_MS);
+    window.addEventListener('focus', this.onFocus);
+  }
+
+  stopAutoRefresh(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    window.removeEventListener('focus', this.onFocus);
+  }
 
   readonly market = signal<Market | undefined>(undefined);
   readonly exposure = signal<Exposure | null>(null);
@@ -29,6 +54,7 @@ export class DashboardStore {
         this.exposure.set(exposure);
         this.workload.set(workload);
         this.loading.set(false);
+        this.lastUpdated.set(new Date());
       },
       error: (err: unknown) => {
         this.error.set(errorMessage(err));

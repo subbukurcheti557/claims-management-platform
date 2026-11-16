@@ -16,7 +16,11 @@ public class ClaimRuleException extends RuntimeException {
         /** The caller's view of the claim is out of date (409). */
         STALE_VERSION,
         /** The same incident on the same policy is already being handled by another claim (409). */
-        DUPLICATE_CLAIM
+        DUPLICATE_CLAIM,
+        /** The uploaded file is not a type the claim accepts (415). */
+        UNSUPPORTED_FILE,
+        /** The uploaded file is over the size limit (413). */
+        FILE_TOO_LARGE
     }
 
     private final Kind kind;

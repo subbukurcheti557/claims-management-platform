@@ -15,3 +15,5 @@ export * from './lib/ui/status-chip.component';
 export * from './lib/ui/pipes';
 export * from './lib/ui/timeline.component';
 export * from './lib/ui/state.components';
+export * from './lib/documents/documents.store';
+export * from './lib/documents/claim-documents.component';

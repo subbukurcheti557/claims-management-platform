@@ -18,6 +18,10 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.icmp.claims.common.web.CorrelationIdFilter;
@@ -40,6 +44,9 @@ public class GlobalExceptionHandler {
                     ex.getMessage(), null);
             case STALE_VERSION -> build(HttpStatus.CONFLICT, "Concurrent modification", ex.getMessage(), null);
             case DUPLICATE_CLAIM -> build(HttpStatus.CONFLICT, "Duplicate claim", ex.getMessage(), null);
+            case UNSUPPORTED_FILE -> build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported file", ex.getMessage(),
+                    null);
+            case FILE_TOO_LARGE -> build(HttpStatus.PAYLOAD_TOO_LARGE, "File too large", ex.getMessage(), null);
             case NOT_PERMITTED -> build(HttpStatus.FORBIDDEN, "Not permitted", ex.getMessage(), null);
             case RULE_VIOLATION -> build(HttpStatus.UNPROCESSABLE_ENTITY, "Business rule violated",
                     ex.getMessage(), null);
@@ -62,6 +69,25 @@ public class GlobalExceptionHandler {
                 + rootMessage(ex), null);
     }
 
+    @ExceptionHandler(com.icmp.claims.document.application.DocumentStoragePort.StorageUnavailableException.class)
+    ResponseEntity<ProblemDetail> handleStorageDown(RuntimeException ex) {
+        log.warn("Document storage unavailable: {}", ex.getMessage());
+        return build(HttpStatus.SERVICE_UNAVAILABLE, "Service temporarily unavailable",
+                "Documents cannot be stored or opened right now. Please try again in a few minutes.", null);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<ProblemDetail> handleTooLarge(MaxUploadSizeExceededException ex) {
+        return build(HttpStatus.PAYLOAD_TOO_LARGE, "File too large",
+                "The file is larger than the 10 MB limit. Reduce the photo size or upload a smaller PDF.", null);
+    }
+
+    @ExceptionHandler({MissingServletRequestPartException.class, MultipartException.class})
+    ResponseEntity<ProblemDetail> handleBadUpload(Exception ex) {
+        return build(HttpStatus.BAD_REQUEST, "Malformed upload",
+                "Send the file as multipart/form-data in a part named \"file\".", null);
+    }
+
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
     ResponseEntity<ProblemDetail> handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
         return build(HttpStatus.CONFLICT, "Concurrent modification",
@@ -77,6 +103,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     ResponseEntity<ProblemDetail> handleNoResource(NoResourceFoundException ex) {
         return build(HttpStatus.NOT_FOUND, "Not found", "No endpoint " + ex.getResourcePath(), null);
+    }
+
+    /**
+     * The browser went away while a response was being written (typically a photo still streaming when the user
+     * left the page). Nothing can be sent back, so this is not an error.
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    void handleClientGone(AsyncRequestNotUsableException ex) {
+        log.debug("Client disconnected before the response was complete: {}", ex.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

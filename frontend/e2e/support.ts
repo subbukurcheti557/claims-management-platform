@@ -1,7 +1,11 @@
 import { APIRequestContext, Page, expect, request } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 export const GATEWAY = process.env['E2E_GATEWAY_URL'] ?? 'http://localhost:8080';
 export const PASSWORD = 'Password1!';
+/** A real JPEG (a drawn car with a dented door), labelled as a sample. */
+export const DAMAGE_PHOTO = join(__dirname, 'fixtures', 'damaged-door.jpg');
 
 /** Fails the test on any uncaught error in the page. */
 export function watchErrors(page: Page): string[] {
@@ -87,6 +91,16 @@ export class Api {
       return res.json();
     }
     throw new Error('Could not find a free incident date for a test claim');
+  }
+
+  /** The claimant adds a damage photo, which approval requires. */
+  async uploadDamagePhoto(claimId: string): Promise<{ id: string; fileName: string }> {
+    const res = await this.ctx.post(`/api/claims/${claimId}/documents?category=DAMAGE_PHOTO`, {
+      headers: this.headers(),
+      multipart: { file: { name: 'damaged-door.jpg', mimeType: 'image/jpeg', buffer: readFileSync(DAMAGE_PHOTO) } },
+    });
+    expect(res.status(), await res.text()).toBe(201);
+    return res.json();
   }
 
   async dispose(): Promise<void> {

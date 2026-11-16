@@ -135,6 +135,48 @@ the same policy and date, and one collided with a seeded open claim. They now us
 
 ---
 
+## Entry 9 — Developer asked for accident photos and supporting documents
+
+**Developer asked:** officers were deciding only from written descriptions and answers. Add accident photo and
+document upload across frontend, backend, database and tests, so officers review real evidence before approving or
+rejecting.
+**AI first pointed out** that the docs called attachments "out of scope (ADR-009)", but ADR-009 is the outbox, so there
+was no decision record at all. It is now ADR-013.
+
+**Design the AI proposed, and I accepted:**
+- Bytes in S3-compatible object storage, metadata and a SHA-256 in a new `claim_document` table (Flyway V4). Not
+  `bytea` in PostgreSQL, which would bloat the database and its backups.
+- Uploads and downloads go **through claims-service**, so the same access rules apply to the file as to the claim and
+  the store is never exposed. Presigned URLs are the next step at scale; they were not used because the signature binds
+  the host name, which differs between the browser and the containers.
+- The file type is read from the first bytes, not from the name or Content-Type (415 otherwise). 10 MB per file
+  (413), 20 per claim. The file name is cleaned and its extension set from the real type.
+- Claimants add evidence to their own claim until the decision; the handling officer or a manager while the claim is
+  open. Claimants see only their own uploads; staff uploads are internal, like notes. Documents are never edited or
+  deleted (they are evidence).
+- **A claim cannot be approved without at least one damage photo** (422, configurable). The check runs after the
+  status, authority and cover rules, so a wrong-status request still gets 409 and an officer over the limit still 403.
+- A `DocumentUploaded` event (metadata only) goes through the outbox; the assigned officer gets "New evidence" when the
+  claimant uploads. The claim's status and version do not change.
+- UI: a shared `ClaimDocumentsComponent` (gallery, full-size viewer, upload) used by both micro-frontends. Images are
+  fetched as blobs with the token, because an `<img src>` cannot send it. Claimants can also attach photos in the
+  last step of the report wizard; they upload right after the claim is created.
+
+**Problems the AI hit and solved by running things:**
+
+| What went wrong | How it was caught | Fix |
+|---|---|---|
+| MinIO, the usual choice, could not be pulled (Docker Hub and quay.io both refused) | `docker pull` | MinIO stopped publishing images. Switched to SeaweedFS (Apache 2.0, maintained). The code only uses the S3 API, so production can be Amazon S3 with configuration only. |
+| Downloaded photo was not the uploaded photo: it had `800;chunk-signature=…` and a CRC trailer inside | integration test comparing bytes | AWS SDK 2.30+ adds checksums with aws-chunked framing by default and SeaweedFS stored the framing. Set checksums to "when required". Without the byte comparison test this would have shipped corrupted photos. |
+| Context failed to start: `sha256` column type mismatch | Hibernate schema validation | `CHAR(64)` → `VARCHAR(64)` in V4 |
+| A file named `.jpg` became `.jpg.jpg` | unit test | treat a leading dot as no base name → `document.jpg` |
+| Playwright could not load the photo fixture with `import.meta.url` | review before running | the e2e project is CommonJS; use `__dirname` |
+
+**Side effect the AI handled:** every existing test, the smoke script and the Playwright flow that approves a claim now
+uploads a damage photo first. The manual test guide's test 12 now shows the 422 as well.
+
+---
+
 ## Verification evidence
 
 - Backend: 131 tests pass (gateway 5, identity 9, policy 15, claims 88, notification 14), on real PostgreSQL and

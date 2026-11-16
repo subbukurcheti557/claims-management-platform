@@ -312,3 +312,38 @@ export interface ProblemDetail {
   correlationId?: string;
   errors?: { field: string; message: string }[];
 }
+
+// ---------- supporting documents (accident photos, reports)
+
+export type DocumentCategory = 'DAMAGE_PHOTO' | 'POLICE_REPORT' | 'REPAIR_ESTIMATE' | 'MEDICAL_REPORT' | 'OTHER';
+
+export const DOCUMENT_CATEGORIES: readonly { code: DocumentCategory; label: string; imagesOnly: boolean }[] = [
+  { code: 'DAMAGE_PHOTO', label: 'Damage photo', imagesOnly: true },
+  { code: 'POLICE_REPORT', label: 'Police report', imagesOnly: false },
+  { code: 'REPAIR_ESTIMATE', label: 'Repair estimate', imagesOnly: false },
+  { code: 'MEDICAL_REPORT', label: 'Medical report', imagesOnly: false },
+  { code: 'OTHER', label: 'Other document', imagesOnly: false },
+];
+
+/** Mirrors claims-service: JPEG/PNG/WebP photos and PDFs, at most 10 MB each (the server checks the real content). */
+export const DOCUMENT_LIMITS = {
+  maxBytes: 10 * 1024 * 1024,
+  imageTypes: ['image/jpeg', 'image/png', 'image/webp'] as readonly string[],
+  allTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] as readonly string[],
+} as const;
+
+export interface ClaimDocument {
+  id: string;
+  category: DocumentCategory;
+  categoryLabel: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedByName: string;
+  uploadedByRole: Role;
+  uploadedAt: string;
+  /** Relative to the gateway; fetch with the bearer token. */
+  contentUrl: string;
+  /** Staff only. */
+  sha256?: string;
+}

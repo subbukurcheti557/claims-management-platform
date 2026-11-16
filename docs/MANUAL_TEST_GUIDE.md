@@ -31,6 +31,7 @@ API-GATEWAY, IDENTITY-SERVICE, POLICY-SERVICE, CLAIMS-SERVICE and NOTIFICATION-S
 | http://localhost:8080 | API gateway (all browser API calls go here) |
 | http://localhost:8761 | Eureka: which services are registered |
 | http://localhost:8089 | Kafka UI: topics, messages, consumer groups |
+| http://localhost:8333 | Object storage (SeaweedFS, S3 API) holding claim photos. Not opened by the browser: files go through claims-service |
 | `localhost:5432` | PostgreSQL (connect with DBeaver) |
 
 **Demo users** all use the password `Password1!`. The sign-in page also has one-click buttons.
@@ -158,6 +159,13 @@ SELECT event_type, event_id, processed_at FROM processed_event ORDER BY processe
 SELECT policy_number, holder_name, status, sum_insured, deductible, paid_to_date, version FROM policy ORDER BY policy_number;
 ```
 
+**Q7 — photos and documents** (claims_db). The bytes are in object storage under `storage_key`.
+```sql
+SELECT c.claim_number, d.category, d.file_name, d.content_type, d.size_bytes, d.uploaded_by_role, d.uploaded_at,
+       left(d.sha256, 12) AS sha256, d.storage_key
+FROM claim_document d JOIN claim c ON c.id = d.claim_id ORDER BY d.uploaded_at DESC LIMIT 10;
+```
+
 **User IDs**, to read `recipient_user_id`:
 
 | ID starts with | User |
@@ -221,10 +229,13 @@ from A3.
 2. Incident date: **3 days ago**. Location: `Orchard Road`. (Not 2 days ago: seeded claim CLM-SG-2026-000001 is already open for that date, see test 4b.)
 3. Description: `Rear-ended at the traffic lights, bumper damaged`.
 4. Injury: **No**. Estimated loss: **8000**.
-5. Review, then submit.
+5. Under **Photos of the damage**, click **Add photos** and choose one or two JPEG or PNG photos from your computer
+   (any photo works). They are listed with their size; you can remove one with ✕.
+6. Review, then submit.
 
 **See:**
 - A claim number like `CLM-SG-2026-000100`, with status **Submitted**.
+- Under **Photos and documents**, your photos as thumbnails. Click one to see it full size (Esc closes it).
 - Within about 2 seconds the 🔔 bell shows **"Claim received"**.
 
 **Check:**
@@ -233,9 +244,10 @@ from A3.
 |---|---|
 | claims_db `claim` (Q1) | New row. `status=SUBMITTED`, `version=0`, `priority=LOW`, `reserve_amount=7500` (8000 minus the 500 deductible), `sla_due_at` = now + 21 days |
 | claims_db `claim_status_history` (Q2) | One row: `null → SUBMITTED`, actor Alice |
-| claims_db `outbox_event` (Q3) | One row `ClaimSubmitted`. `published_at` is filled within about 1 s |
+| claims_db `outbox_event` (Q3) | `ClaimSubmitted`, then one `DocumentUploaded` per photo. `published_at` is filled within about 1 s |
+| claims_db `claim_document` (Q7) | One row per photo: `DAMAGE_PHOTO`, `image/jpeg`, uploaded by CLAIMANT, a SHA-256 and a `storage_key` |
 | Kafka `claims.lifecycle.v1` | One message. Key = claim id; headers `eventType=ClaimSubmitted`, `eventId=…` |
-| notification_db `notification` (Q4) | "Claim received" for `1111…` (Alice), category INFO |
+| notification_db `notification` (Q4) | "Claim received" for `1111…` (Alice), category INFO. No "New evidence" yet: no officer is assigned |
 | notification_db `processed_event` (Q5) | The event id |
 | policy_db | **No change**. policy-service reads the event but only acts on `ClaimSettled` |
 
@@ -248,6 +260,9 @@ from A3.
 4. **Asynchronous:** the outbox relay, which runs every 1 s, sends the outbox row to Kafka and sets `published_at`.
 5. notification-service consumes the event, writes `notification` and `processed_event`, and the bell polls the new
    notification.
+
+6. The photos are uploaded right after the claim is created (a file needs a claim to belong to). Each one goes to
+   object storage first, then its `claim_document` row and a `DocumentUploaded` event commit together.
 
 > **Why an outbox?** If claims-service saved the claim and then crashed before sending to Kafka, the event would be
 > lost. The outbox row is saved in the same transaction as the claim, so the event is guaranteed to go out
@@ -411,6 +426,38 @@ object `Claim`, not in the controller.
 
 ---
 
+### Test 9b — Photos and documents ⭐
+
+**Do:**
+1. As Olivia, open your claim from test 3 and look at **Photos and documents**. Click a photo to see it full size.
+2. As Alice, open the same claim. Under **Photos and documents** choose **Police report** and add a PDF.
+3. As Alice, choose **Damage photo** and try a PDF or a .docx. Then rename a text file to `fake.jpg` and try that.
+4. As Olivia, choose **Other document** and add any PDF (for example an assessor report).
+5. As Bob, open `http://localhost:8080/api/claims/<claim id>/documents` with his token (or try the claim URL in the app).
+
+**See:**
+1. Olivia sees every file, who uploaded it and when.
+2. Alice's police report appears. Olivia's bell shows **"New evidence on CLM-…"**.
+3. The PDF and the .docx are refused in the browser before anything is sent. `fake.jpg` passes the browser check
+   (its name and type look right) but the server answers **415 Unsupported file**, because the content is not an image.
+4. Olivia's document is shown to staff only. Alice does not see it.
+5. Bob gets **404**, as for any claim that is not his.
+
+**Check:**
+- Q7 has rows for the photo, the police report and Olivia's document. There is no row for `fake.jpg`.
+- Q3 and Kafka have a `DocumentUploaded` per file, with only metadata in `data` (never the file).
+- Q4: "New evidence" for Olivia (`3333…`) after Alice's upload, but nothing after Olivia's own upload.
+- Q1: the claim's `version` and `status` did not change. A document is not a status change.
+
+**Why:**
+- The type is read from the file's first bytes (JPEG `FF D8 FF`, PNG, WebP, `%PDF-`), not from the name or the
+  browser's Content-Type, which the client controls. The file name is cleaned and its extension set from the real type.
+- Files are streamed back through claims-service with the same access check as the claim, `nosniff` and `no-store`.
+  Object storage is never exposed to the browser.
+- Documents are evidence, so they cannot be edited or deleted through the API.
+
+---
+
 ### Test 10 — Approve within the officer's limit
 
 **Do:** as Olivia, choose **Approve**, enter amount **7200** and confirm.
@@ -424,7 +471,8 @@ object `Claim`, not in the controller.
 
 **Why:**
 - The authority check converts SGD 7200 to USD, which is about 5.4k and under Olivia's USD 25k limit.
-- Approval also requires an assessment whose liability is not DENIED.
+- Approval also requires an assessment whose liability is not DENIED, and at least one **damage photo** on the claim
+  (see test 12).
 
 ---
 
@@ -491,7 +539,10 @@ Withdraw this claim as Alice afterwards, if you want the later tests to match th
 
 **See:**
 - Olivia's Approve is **refused**: SGD 55,000 is about USD 41k, above her USD 25k limit.
-- Sign in as **maya@staff.test** (manager), open the claim and approve it. That works.
+- Sign in as **maya@staff.test** (manager) and open the claim. The Approve form says **there are no damage photos**
+  and the button is disabled (the claim from test 5 was reported without photos). Through the API the same request
+  answers **422** "has no damage photos".
+- As Alice, add a damage photo to that claim. Reload Maya's page and approve. That works.
 
 **Check:**
 - After Olivia's attempt, the claim is unchanged and still ASSESSED.
@@ -604,7 +655,7 @@ markets can be added together.
 ### Test 20 — A consumer is down, and Kafka keeps the event
 
 1. Stop notification-service: `docker stop icmp-notification`
-2. As Olivia, approve or settle a claim. **It still works.** claims-service doesn't depend on notification-service.
+2. As Olivia, approve a claim that has a damage photo, or settle one. **It still works.** claims-service doesn't depend on notification-service.
 3. In Kafka UI, open **Consumers → notification-service**. The **lag is now 1 or more**: the message is waiting.
 4. Start it again: `docker start icmp-notification`. Within about 30 s the lag returns to 0, and Q4 shows the
    notification.

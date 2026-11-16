@@ -87,6 +87,25 @@
           </dl>
         </section>
 
+        <section class="icmp-card" aria-labelledby="evidence-title" data-testid="claim-documents">
+          <h2 id="evidence-title">
+            Photos and documents
+            @if (damagePhotos() !== null) {
+              <span class="icmp-muted count">({{ damagePhotos() }} damage photo{{ damagePhotos() === 1 ? '' : 's' }})</span>
+            }
+          </h2>
+          @if (canAddDocuments()) {
+            <p class="icmp-muted small">Files you add here are internal: the claimant does not see them.</p>
+          }
+          <icmp-claim-documents
+            [claimId]="c.id"
+            [canUpload]="canAddDocuments()"
+            [staffView]="true"
+            emptyText="The claimant has not uploaded any photos or documents yet."
+            (damagePhotos)="damagePhotos.set($event)"
+          />
+        </section>
+
         <section class="icmp-card" aria-labelledby="cover-title">
           <h2 id="cover-title">Cover at time of report</h2>
           <dl class="icmp-kv">
@@ -173,6 +192,7 @@
             [isManager]="auth.isManager()"
             [staff]="store.staff()"
             [busy]="store.busy()"
+            [damagePhotos]="damagePhotos()"
             (assign)="store.assign($event)"
             (requestInfo)="store.requestInfo($event)"
             (assess)="store.assess($event)"

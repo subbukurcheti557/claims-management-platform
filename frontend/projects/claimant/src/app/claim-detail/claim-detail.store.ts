@@ -1,8 +1,11 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { ClaimDetail, ClaimsApi, TimelineEntry, errorMessage } from '@icmp/shared';
+import { ClaimDetail, ClaimStatus, ClaimsApi, TimelineEntry, errorMessage } from '@icmp/shared';
 import { forkJoin } from 'rxjs';
 
-/** One claim as the claimant sees it, plus the two things they can do: answer a question, withdraw. */
+/** Statuses in which the claimant can still add evidence (mirrors claims-service): until the decision. */
+const EVIDENCE_OPEN: readonly ClaimStatus[] = ['SUBMITTED', 'UNDER_REVIEW', 'INFO_REQUESTED', 'ASSESSED'];
+
+/** One claim as the claimant sees it, plus what they can do: answer a question, add evidence, withdraw. */
 @Injectable()
 export class ClaimDetailStore {
   private readonly api = inject(ClaimsApi);
@@ -17,6 +20,10 @@ export class ClaimDetailStore {
 
   readonly openRequests = computed(() => this.claim()?.infoRequests.filter((r) => r.status === 'OPEN') ?? []);
   readonly answeredRequests = computed(() => this.claim()?.infoRequests.filter((r) => r.status !== 'OPEN') ?? []);
+  readonly canAddDocuments = computed(() => {
+    const status = this.claim()?.status;
+    return !!status && EVIDENCE_OPEN.includes(status);
+  });
   readonly canWithdraw = computed(() => this.claim()?.allowedActions.includes('WITHDRAW') ?? false);
 
   load(id: string): void {

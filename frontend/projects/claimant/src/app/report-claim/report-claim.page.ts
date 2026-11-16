@@ -13,6 +13,8 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   ClaimsApi,
   EnumLabelPipe,
+  checkDocumentFile,
+  formatBytes,
   LoadStateComponent,
   MoneyPipe,
   PageHeaderComponent,
@@ -20,7 +22,10 @@ import {
   PolicyApi,
   errorMessage,
 } from '@icmp/shared';
-import { startWith } from 'rxjs';
+import { catchError, concatMap, from, map, of, startWith, toArray } from 'rxjs';
+
+/** Photos attached while reporting; more can be added on the claim page afterwards. */
+const MAX_FNOL_PHOTOS = 10;
 
 /** Incident date must be today or earlier. */
 function notInFuture(control: { value: string }) {
@@ -63,6 +68,10 @@ export class ReportClaimPage implements OnInit {
   protected readonly policyError = signal<string | null>(null);
   protected readonly submitting = signal(false);
   protected readonly submitError = signal<string | null>(null);
+  protected readonly photos = signal<File[]>([]);
+  protected readonly photoProblems = signal<string[]>([]);
+  protected readonly uploadingPhotos = signal(false);
+  protected readonly maxPhotos = MAX_FNOL_PHOTOS;
 
   protected readonly policyForm = this.fb.group({ policyNumber: ['', Validators.required] });
   protected readonly incidentForm = this.fb.group({
@@ -104,6 +113,34 @@ export class ReportClaimPage implements OnInit {
     });
   }
 
+  protected addPhotos(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const chosen = Array.from(input.files ?? []);
+    input.value = '';
+    const problems: string[] = [];
+    const accepted: File[] = [];
+    for (const file of chosen) {
+      const problem = checkDocumentFile(file, 'DAMAGE_PHOTO');
+      if (problem) {
+        problems.push(problem);
+      } else if (this.photos().length + accepted.length >= MAX_FNOL_PHOTOS) {
+        problems.push(`${file.name} was not added: attach up to ${MAX_FNOL_PHOTOS} photos here, and add more later.`);
+      } else {
+        accepted.push(file);
+      }
+    }
+    this.photos.update((list) => [...list, ...accepted]);
+    this.photoProblems.set(problems);
+  }
+
+  protected removePhoto(index: number): void {
+    this.photos.update((list) => list.filter((_, i) => i !== index));
+  }
+
+  protected size(bytes: number): string {
+    return formatBytes(bytes);
+  }
+
   protected submit(): void {
     const policy = this.selected();
     if (!policy || this.incidentForm.invalid || this.lossForm.invalid) {
@@ -125,14 +162,41 @@ export class ReportClaimPage implements OnInit {
         estimatedLoss: Number(this.lossForm.getRawValue().estimatedLoss),
       })
       .subscribe({
-        next: (claim) => {
-          this.submitting.set(false);
-          void this.router.navigate(['..', claim.id], { relativeTo: this.route, queryParams: { submitted: 1 } });
-        },
+        next: (claim) => this.uploadPhotosThenOpen(claim.id),
         error: (err: unknown) => {
           this.submitting.set(false);
           this.submitError.set(errorMessage(err));
         },
       });
+  }
+
+  /**
+   * The claim must exist before files can be attached to it, so photos are uploaded right after it is created.
+   * A failed photo does not undo the claim: the claim page says how many failed so they can be added again.
+   */
+  private uploadPhotosThenOpen(claimId: string): void {
+    const open = (failed: number) => {
+      this.submitting.set(false);
+      this.uploadingPhotos.set(false);
+      const queryParams = failed > 0 ? { submitted: 1, photosFailed: failed } : { submitted: 1 };
+      void this.router.navigate(['..', claimId], { relativeTo: this.route, queryParams });
+    };
+    const photos = this.photos();
+    if (photos.length === 0) {
+      open(0);
+      return;
+    }
+    this.uploadingPhotos.set(true);
+    from(photos)
+      .pipe(
+        concatMap((file) =>
+          this.claimsApi.uploadDocument(claimId, 'DAMAGE_PHOTO', file).pipe(
+            map(() => true),
+            catchError(() => of(false)),
+          ),
+        ),
+        toArray(),
+      )
+      .subscribe((results) => open(results.filter((ok) => !ok).length));
   }
 }

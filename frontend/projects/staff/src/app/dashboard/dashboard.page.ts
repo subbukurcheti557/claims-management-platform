@@ -46,6 +46,7 @@ export class DashboardPage implements OnInit {
 
   ngOnInit(): void {
     this.store.load();
+    this.store.startAutoRefresh();
   }
 
   protected pct(value: number, max: number): string {

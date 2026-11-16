@@ -20,6 +20,8 @@ public record ClaimDomainEvent(UUID eventId, String eventType, Instant occurredA
     public static final String SETTLED = "ClaimSettled";
     public static final String REJECTED = "ClaimRejected";
     public static final String WITHDRAWN = "ClaimWithdrawn";
+    /** A supporting document was added; the claim's status does not change. */
+    public static final String DOCUMENT_UPLOADED = "DocumentUploaded";
 
     public static ClaimDomainEvent of(String type, Actor actor, Map<String, Object> data) {
         return new ClaimDomainEvent(UUID.randomUUID(), type, Instant.now(), actor.id(), data);

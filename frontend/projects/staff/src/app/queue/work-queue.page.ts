@@ -77,6 +77,7 @@ export class WorkQueuePage implements OnInit {
   ngOnInit(): void {
     this.store.load();
     this.store.loadMyStats();
+    this.store.startAutoRefresh();
   }
 
   protected scopeIndex(): number {

@@ -125,3 +125,21 @@
 mat-paginator {
   background: transparent;
 }
+
+.updated {
+  align-self: center;
+  font-size: 0.8125rem;
+}
+
+.waiting {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--icmp-accent);
+  color: var(--icmp-surface);
+  font: 600 0.75rem var(--icmp-font-mono);
+}

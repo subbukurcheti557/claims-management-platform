@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { signInWithDemo, watchErrors } from './support';
+import { DAMAGE_PHOTO, signInWithDemo, watchErrors } from './support';
 
 test.describe('Claimant', () => {
   test('reports an incident through the wizard and sees it tracked', async ({ page }) => {
@@ -34,6 +34,9 @@ test.describe('Claimant', () => {
     // Step 3: loss and review
     await page.getByLabel('Estimated cost of the damage').fill('2400');
     await expect(page.getByRole('region', { name: 'Review', exact: true })).toContainText('Changi Airport car park');
+    // a photo of the damage, attached before submitting (uploaded once the claim exists)
+    await page.getByTestId('fnol-photos').setInputFiles(DAMAGE_PHOTO);
+    await expect(page.getByText('damaged-door.jpg')).toBeVisible();
     await page.getByRole('button', { name: 'Submit claim' }).click();
 
     // Lands on the new claim, coverage confirmed synchronously
@@ -42,6 +45,17 @@ test.describe('Claimant', () => {
     await expect(page.getByLabel('Status: Submitted')).toBeVisible();
     await expect(page.getByRole('list', { name: 'Claim progress' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Withdraw this claim' })).toBeVisible();
+
+    // the photo is on the claim, fetched with the token and shown as a thumbnail
+    const documents = page.getByTestId('claim-documents');
+    await expect(documents.getByRole('img', { name: 'Damage photo: damaged-door.jpg' })).toBeVisible();
+    // a PDF is not a damage photo: refused in the browser before anything is sent
+    await documents.getByTestId('document-file').setInputFiles({
+      name: 'scan.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4\n'),
+    });
+    await expect(documents.getByRole('alert')).toContainText('scan.pdf is not a photo');
 
     // Kafka -> notification-service -> bell (the bell refreshes on reload)
     await expect(async () => {

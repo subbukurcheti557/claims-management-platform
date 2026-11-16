@@ -37,6 +37,24 @@ async function call(method, path, token, body) {
   return { status: res.status, body: json, headers: res.headers };
 }
 
+/** A real 1x1 JPEG: claims-service recognises files by their content, not by name or Content-Type. */
+const JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=',
+  'base64',
+);
+
+async function upload(claimId, token, category, fileName, type, bytes) {
+  const form = new FormData();
+  form.append('file', new Blob([bytes], { type }), fileName);
+  const res = await fetch(`${GW}/api/claims/${claimId}/documents?category=${category}`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form,
+  });
+  const text = await res.text();
+  let json;
+  try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
+  return { status: res.status, body: json };
+}
+
 async function login(email) {
   const r = await call('POST', '/api/auth/login', undefined, { email, password: PASSWORD });
   if (r.status !== 200) fail(`login ${email}`, r);
@@ -83,7 +101,8 @@ const alice = await login('alice@claimant.test');
 const olivia = await login('olivia@staff.test');
 const omar = await login('omar@staff.test');
 const maya = await login('maya@staff.test');
-ok('claimant, two officers and a manager can log in');
+const bob = await login('bob@claimant.test');
+ok('two claimants, two officers and a manager can log in');
 expect((await call('POST', '/api/auth/login', undefined, { email: 'alice@claimant.test', password: 'wrong' })).status === 401,
   'wrong password is rejected with 401');
 expect((await call('GET', '/api/claims/mine')).status === 401, 'request without token is rejected at the gateway (401)');
@@ -154,6 +173,20 @@ expect(answered.body.status === 'UNDER_REVIEW', 'claimant answers → back to UN
 await notificationFor(olivia, claim.claimNumber, 'Claimant responded');
 ok('Kafka: InfoProvided → officer notified');
 
+console.log('\nAccident photos (object storage + Kafka)');
+const photo = await upload(claim.id, alice, 'DAMAGE_PHOTO', 'rear-bumper.jpg', 'image/jpeg', JPEG);
+expect(photo.status === 201 && photo.body.contentType === 'image/jpeg', 'claimant uploads a damage photo (201)', photo.body);
+const fakePhoto = await upload(claim.id, alice, 'DAMAGE_PHOTO', 'photo.jpg', 'image/jpeg', Buffer.from('<script>alert(1)</script>'));
+expect(fakePhoto.status === 415, 'a text file named .jpg is refused with 415 (content is checked, not the name)', fakePhoto.body);
+const download = await fetch(GW + photo.body.contentUrl, { headers: { Authorization: `Bearer ${olivia}` } });
+const downloaded = Buffer.from(await download.arrayBuffer());
+expect(download.status === 200 && download.headers.get('content-type') === 'image/jpeg' && downloaded.equals(JPEG),
+  'officer downloads exactly the bytes the claimant uploaded');
+expect((await call('GET', `/api/claims/${claim.id}/documents`, bob)).status === 404,
+  'another claimant cannot list the photos (404)');
+await notificationFor(olivia, claim.claimNumber, 'New evidence');
+ok('Kafka: DocumentUploaded → officer notified of new evidence');
+
 console.log('\nAssessment and decision');
 const assessed = await call('POST', `/api/claims/${claim.id}/assessment`, olivia, {
   liability: 'ACCEPTED', recommendedAmount: 7200, reserveAmount: 7200, findings: 'Police report and photos match the description.',
@@ -205,8 +238,12 @@ await call('POST', `/api/claims/${big.body.id}/assessment`, olivia, {
 });
 const overLimit = await call('POST', `/api/claims/${big.body.id}/approve`, olivia, { amount: 55000 });
 expect(overLimit.status === 403, 'officer cannot approve SGD 55,000 (above USD 25k limit) → 403');
+const noPhoto = await call('POST', `/api/claims/${big.body.id}/approve`, maya, { amount: 55000 });
+expect(noPhoto.status === 422 && noPhoto.body?.detail?.includes('no damage photos'),
+  'even a manager cannot approve without a damage photo (422)', noPhoto.body);
+await upload(big.body.id, alice, 'DAMAGE_PHOTO', 'kitchen.jpg', 'image/jpeg', JPEG);
 const managerApproval = await call('POST', `/api/claims/${big.body.id}/approve`, maya, { amount: 55000 });
-expect(managerApproval.body.status === 'APPROVED', 'manager approves it');
+expect(managerApproval.body.status === 'APPROVED', 'after the claimant adds a photo, the manager approves it');
 expect((await call('GET', '/api/claims/c0000000-0000-0000-0000-000000000002', alice)).status === 404,
   'claimant cannot see another claimant’s claim (404)');
 expect((await call('GET', '/api/claims/queue', alice)).status === 403, 'claimant cannot open the staff queue (403)');

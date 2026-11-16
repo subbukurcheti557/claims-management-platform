@@ -120,7 +120,13 @@
               <p>This is above your approval limit of USD 25,000. A claims manager needs to approve it.</p>
             </div>
           }
-          <button mat-flat-button type="submit" [disabled]="busy() !== null || approveForm.invalid || overLimit()">
+          @if (noPhotos()) {
+            <div class="icmp-banner" data-tone="warning" role="status" data-testid="no-photos">
+              <span class="material-symbols-outlined" aria-hidden="true">no_photography</span>
+              <p>There are no damage photos on this claim. Ask the claimant for photos before approving.</p>
+            </div>
+          }
+          <button mat-flat-button type="submit" [disabled]="busy() !== null || approveForm.invalid || overLimit() || noPhotos()">
             Approve claim
           </button>
         </form>

@@ -7,6 +7,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { RouterLink } from '@angular/router';
 import {
+  ClaimDocumentsComponent,
   EnumLabelPipe,
   LoadStateComponent,
   MoneyPipe,
@@ -22,6 +23,7 @@ import { ClaimDetailStore } from './claim-detail.store';
 @Component({
   selector: 'claimant-claim-detail',
   imports: [
+    ClaimDocumentsComponent,
     DatePipe,
     EnumLabelPipe,
     FormsModule,
@@ -47,6 +49,8 @@ export class ClaimDetailPage {
   readonly id = input.required<string>();
   /** Set right after FNOL. */
   readonly submitted = input<string>();
+  /** Photos attached while reporting that could not be uploaded. */
+  readonly photosFailed = input<string>();
 
   protected readonly steps = PROGRESS_STEPS;
   protected readonly meta = STATUS_META;

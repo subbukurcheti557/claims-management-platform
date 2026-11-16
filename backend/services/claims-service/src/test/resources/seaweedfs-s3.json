@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "claims-service",
+      "credentials": [
+        { "accessKey": "claims-dev-access-key", "secretKey": "claims-dev-secret-key-change-me" }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

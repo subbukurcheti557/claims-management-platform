@@ -130,6 +130,33 @@
             </section>
           }
 
+          <section class="photos" aria-labelledby="photos-title">
+            <h3 id="photos-title">Photos of the damage <span class="icmp-muted">(recommended)</span></h3>
+            <p class="icmp-muted">Clear photos from more than one angle help your claims officer decide faster. JPEG, PNG or WebP, up to 10 MB each. You can add more, or a police report, after submitting.</p>
+            <input #photoInput type="file" class="file-input" accept="image/jpeg,image/png,image/webp" multiple (change)="addPhotos($event)" data-testid="fnol-photos" aria-label="Choose photos of the damage" />
+            <button mat-stroked-button type="button" (click)="photoInput.click()" [disabled]="photos().length >= maxPhotos || submitting()">
+              <span class="material-symbols-outlined" aria-hidden="true">add_a_photo</span>
+              Add photos
+            </button>
+            @for (problem of photoProblems(); track $index) {
+              <p class="photo-problem" role="alert">{{ problem }}</p>
+            }
+            @if (photos().length > 0) {
+              <ul class="photo-list">
+                @for (f of photos(); track $index; let i = $index) {
+                  <li>
+                    <span class="material-symbols-outlined" aria-hidden="true">image</span>
+                    <span class="photo-name">{{ f.name }}</span>
+                    <span class="icmp-muted">{{ size(f.size) }}</span>
+                    <button mat-icon-button type="button" (click)="removePhoto(i)" [attr.aria-label]="'Remove ' + f.name" [disabled]="submitting()">
+                      <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
+          </section>
+
           @if (submitError()) {
             <div class="icmp-banner" data-tone="danger" role="alert">
               <span class="material-symbols-outlined" aria-hidden="true">error</span>
@@ -143,7 +170,9 @@
           <div class="icmp-actions-row">
             <button mat-button matStepperPrevious type="button">Back</button>
             <button mat-flat-button type="submit" [disabled]="lossForm.invalid || submitting()">
-              @if (submitting()) {
+              @if (uploadingPhotos()) {
+                Uploading photos…
+              } @else if (submitting()) {
                 <mat-spinner diameter="20" aria-label="Submitting" />
               } @else {
                 Submit claim

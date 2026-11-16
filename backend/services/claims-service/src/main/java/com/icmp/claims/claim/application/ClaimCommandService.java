@@ -48,6 +48,9 @@ import com.icmp.claims.claim.infrastructure.persistence.ClaimNoteRepository;
 import com.icmp.claims.claim.infrastructure.persistence.ClaimRepository;
 import com.icmp.claims.common.error.ApiException;
 import com.icmp.claims.common.security.CurrentUser;
+import com.icmp.claims.document.domain.DocumentCategory;
+import com.icmp.claims.document.domain.EvidencePolicy;
+import com.icmp.claims.document.infrastructure.ClaimDocumentRepository;
 
 /**
  * Use cases that change claims. Each command loads the aggregate, calls one intent method, writes the recorded
@@ -63,28 +66,33 @@ public class ClaimCommandService {
 
     private final ClaimRepository claims;
     private final ClaimNoteRepository notes;
+    private final ClaimDocumentRepository documents;
     private final EventOutboxPort outbox;
     private final PolicyCoveragePort policyCoverage;
     private final StaffDirectoryPort staffDirectory;
     private final TriagePolicy triagePolicy;
     private final AuthorityPolicy authorityPolicy;
+    private final EvidencePolicy evidencePolicy;
     private final CurrencyConverter converter;
     private final ClaimViewMapper mapper;
     private final TransactionTemplate tx;
     private final Clock clock;
 
-    public ClaimCommandService(ClaimRepository claims, ClaimNoteRepository notes, EventOutboxPort outbox,
+    public ClaimCommandService(ClaimRepository claims, ClaimNoteRepository notes,
+                               ClaimDocumentRepository documents, EventOutboxPort outbox,
                                PolicyCoveragePort policyCoverage, StaffDirectoryPort staffDirectory,
                                TriagePolicy triagePolicy, AuthorityPolicy authorityPolicy,
-                               CurrencyConverter converter, ClaimViewMapper mapper, TransactionTemplate tx,
-                               Clock clock) {
+                               EvidencePolicy evidencePolicy, CurrencyConverter converter, ClaimViewMapper mapper,
+                               TransactionTemplate tx, Clock clock) {
         this.claims = claims;
         this.notes = notes;
+        this.documents = documents;
         this.outbox = outbox;
         this.policyCoverage = policyCoverage;
         this.staffDirectory = staffDirectory;
         this.triagePolicy = triagePolicy;
         this.authorityPolicy = authorityPolicy;
+        this.evidencePolicy = evidencePolicy;
         this.converter = converter;
         this.mapper = mapper;
         this.tx = tx;
@@ -184,6 +192,9 @@ public class ClaimCommandService {
             BigDecimal approvedOnOthers = claims.sumApprovedOnOtherClaims(claim.getPolicyNumber(), claim.getId(),
                     APPROVED_OR_PAID);
             claim.approve(cmd.amount(), approvedOnOthers, authorityPolicy, actor(user), now());
+            // after the status, authority and cover checks; throwing here rolls the approval back
+            evidencePolicy.checkReadyForApproval(claim,
+                    documents.countByClaimIdAndCategory(claim.getId(), DocumentCategory.DAMAGE_PHOTO));
         });
     }
 

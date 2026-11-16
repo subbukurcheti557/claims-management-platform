@@ -5,9 +5,11 @@ import { Observable } from 'rxjs';
 import { API_BASE_URL } from '../config/api-config';
 import {
   ClaimDetail,
+  ClaimDocument,
   ClaimNote,
   ClaimStatus,
   ClaimSummary,
+  DocumentCategory,
   Exposure,
   Liability,
   Market,
@@ -24,7 +26,8 @@ import {
 @Injectable({ providedIn: 'root' })
 export class ClaimsApi {
   private readonly http = inject(HttpClient);
-  private readonly base = `${inject(API_BASE_URL)}/api/claims`;
+  private readonly gateway = inject(API_BASE_URL);
+  private readonly base = `${this.gateway}/api/claims`;
 
   // ---------- claimant
   submit(request: NewClaimRequest): Observable<ClaimDetail> {
@@ -52,6 +55,23 @@ export class ClaimsApi {
 
   timeline(claimId: string): Observable<TimelineEntry[]> {
     return this.http.get<TimelineEntry[]>(`${this.base}/${claimId}/timeline`);
+  }
+
+  // ---------- documents (both user types; the server decides what each may see)
+  documents(claimId: string): Observable<ClaimDocument[]> {
+    return this.http.get<ClaimDocument[]>(`${this.base}/${claimId}/documents`);
+  }
+
+  uploadDocument(claimId: string, category: DocumentCategory, file: File): Observable<ClaimDocument> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const params = new HttpParams().set('category', category);
+    return this.http.post<ClaimDocument>(`${this.base}/${claimId}/documents`, form, { params });
+  }
+
+  /** The file itself, through the gateway with the bearer token (an <img src> could not send it). */
+  documentContent(document: ClaimDocument): Observable<Blob> {
+    return this.http.get(`${this.gateway}${document.contentUrl}`, { responseType: 'blob' });
   }
 
   // ---------- staff

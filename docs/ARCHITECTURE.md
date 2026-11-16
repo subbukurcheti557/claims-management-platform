@@ -63,6 +63,7 @@ flowchart LR
   ID --- DB1[(identity_db)]
   PS --- DB2[(policy_db)]
   CS --- DB3[(claims_db)]
+  CS -- "S3 API<br/>photos, documents" --> OS[(Object storage<br/>SeaweedFS :8333 / S3)]
   NS --- DB4[(notification_db)]
 
   EU[Eureka :8761]
@@ -73,14 +74,14 @@ flowchart LR
 
 | Service | Type | Owns | Why it is its own service |
 |---|---|---|---|
-| **claims-service** | Business (core) | Claim aggregate, lifecycle state machine, info requests, assessments, decisions, internal notes, workload & exposure read models | The core domain; highest change rate; its data is the system of record for liability |
+| **claims-service** | Business (core) | Claim aggregate, lifecycle state machine, info requests, assessments, decisions, internal notes, supporting documents (metadata in claims_db, bytes in object storage), workload & exposure read models | The core domain; highest change rate; its data is the system of record for liability |
 | **policy-service** | Business | Policies, coverage (sum insured, deductible, period), paid-to-date against policy | Different lifecycle (underwriting), different owners; claims needs a *read* of coverage, not ownership |
 | **notification-service** | Business | Per-user in-app notifications (claimant + staff), delivery log | Pure downstream consumer; must never block or fail a claim transaction |
 | identity-service | Platform | Users, roles, credentials, JWT issuance | Security concern, swappable for Keycloak/Azure AD later (ADR-005) |
 | api-gateway | Platform | Routing, edge auth, CORS, `/internal/**` blocking | Single origin for the SPA |
 | discovery-server | Platform | Eureka registry | Required by stack; enables `lb://` routing |
 
-**Deliberately not split out:** documents/attachments (out of scope, ADR-009), assessment as a separate service (it shares the claim's consistency boundary — splitting would force distributed transactions over a single state machine).
+**Deliberately not split out:** documents/attachments (they belong to the claim and decide whether it may be approved, so they stay in claims-service; only the bytes go to object storage, ADR-013), assessment as a separate service (it shares the claim's consistency boundary — splitting would force distributed transactions over a single state machine).
 
 ---
 
@@ -149,6 +150,23 @@ policy's full sum insured (`policy_sum_insured`, copied at FNOL); otherwise 422.
 not enough, because two claims open at the same time both see the same remaining cover. Both checks run under a
 PostgreSQL advisory lock per policy (`pg_advisory_xact_lock`), so two concurrent requests cannot both pass.
 
+**Accident photos and supporting documents** (`EvidencePolicy`, ADR-013):
+
+| Rule | Detail |
+|---|---|
+| Accepted files | JPEG, PNG, WebP photos and PDF, **recognised from the first bytes**, not from the name or the browser's Content-Type (415 otherwise); 10 MB each (413); 20 per claim (422) |
+| Categories | DAMAGE_PHOTO (images only), POLICE_REPORT, REPAIR_ESTIMATE, MEDICAL_REPORT, OTHER |
+| Who can add | Claimant on their own claim until the decision (SUBMITTED to ASSESSED); assigned officer or any manager while the claim is open. Otherwise 409 (status) or 403 |
+| Who can see | Staff see every document; a claimant sees only what they uploaded (staff uploads such as an assessor report are internal, like notes) |
+| Approval | A claim needs **at least one DAMAGE_PHOTO** before it can be approved (422; `app.documents.photo-required-for-approval`). Checked after the status, authority and cover rules, inside the approval transaction |
+| Integrity | Documents are evidence: never edited or deleted through the API. A SHA-256 of each file is stored (staff can see it) |
+
+Upload order: bytes to object storage first (key `claims/{claimId}/{documentId}.{ext}`), then the `claim_document`
+row and a `DocumentUploaded` outbox event in one transaction, under a per-claim advisory lock so parallel uploads
+cannot pass the 20-file limit. If that transaction fails the object is deleted again, so a row never points at a missing
+file (an orphaned object is harmless). Downloads go **through claims-service** with the same access check, with the stored
+content type, `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`; the store is never exposed to the browser.
+
 ### 4.2 Entities
 
 ```mermaid
@@ -157,6 +175,7 @@ erDiagram
   CLAIM ||--o{ INFO_REQUEST : "asks"
   CLAIM ||--o{ CLAIM_NOTE : "internal"
   CLAIM ||--o| ASSESSMENT : "latest"
+  CLAIM ||--o{ CLAIM_DOCUMENT : "evidence"
   CLAIM {
     uuid id PK
     string claim_number UK "CLM-SG-2026-000123"
@@ -189,6 +208,7 @@ erDiagram
   INFO_REQUEST { uuid id PK; uuid claim_id FK; text question; text response; string status "OPEN|ANSWERED"; uuid requested_by; timestamp requested_at; timestamp responded_at }
   CLAIM_NOTE { uuid id PK; uuid claim_id FK; uuid author_id; text body; timestamp created_at }
   ASSESSMENT { uuid id PK; uuid claim_id FK; string liability "ACCEPTED|PARTIAL|DENIED"; decimal recommended_amount; decimal reserve_amount; text findings; uuid assessor_id; timestamp assessed_at }
+  CLAIM_DOCUMENT { uuid id PK; uuid claim_id FK; string category; string file_name; string content_type; bigint size_bytes; string sha256; string storage_key UK; uuid uploaded_by_id; string uploaded_by_role; timestamp uploaded_at }
   OUTBOX_EVENT { uuid id PK; string aggregate_id; string event_type; jsonb payload; timestamp created_at; timestamp published_at }
 ```
 
@@ -255,6 +275,9 @@ Commands are **intent-based** (`/approve`, `/reject`) rather than `PATCH status`
 | POST | `/api/claims/{id}/settle` | STAFF | payment reference, paid amount |
 | POST | `/api/claims/{id}/reject` | STAFF | reason code + explanation to claimant |
 | GET/POST | `/api/claims/{id}/notes` | STAFF | internal only |
+| POST | `/api/claims/{id}/documents?category=` | CLAIMANT owner / STAFF handler | multipart `file`; 201 + Location; 415 wrong type, 413 too large, 409 claim decided |
+| GET | `/api/claims/{id}/documents` | owner / STAFF | claimant: own uploads only; staff also get `sha256` |
+| GET | `/api/claims/{id}/documents/{docId}/content` | owner / STAFF | the bytes, streamed through the service; `?download=true` for attachment |
 | GET | `/api/claims/stats/me` | OFFICER | my open, SLA breaches, closed 30d, avg cycle time |
 | GET | `/api/claims/stats/workload` | STAFF | per officer: open by status, SLA breached, closed 30d, avg days to close |
 | GET | `/api/claims/stats/exposure` | MANAGER (officers read-only summary) | §4.3 |
@@ -300,6 +323,7 @@ Envelope (in `event-contracts` module, versioned):
 | ClaimSettled | settle | claimant: payment | **add to `paid_to_date`** |
 | ClaimRejected | reject | claimant: decision + reason | — |
 | ClaimWithdrawn | withdraw | assigned officer | — |
+| DocumentUploaded | photo or document added (status unchanged; metadata only, never the file) | assigned officer, when the claimant uploaded: "New evidence" | — |
 
 ---
 
@@ -409,7 +433,7 @@ claims-management-platform/
 ├── contracts/
 │   ├── openapi/                 exported OpenAPI spec of each service
 │   └── events/                  claims.lifecycle.v1.schema.json (the Kafka contract)
-├── infra/postgres/              init script: 4 databases, 4 logins
+├── infra/                       postgres/ init script (4 databases, 4 logins); seaweedfs/ S3 credentials
 ├── scripts/                     build-all.sh, e2e-smoke.mjs, verify-fresh-stack.sh
 ├── docker-compose.yml           whole stack, run from the repository root
 └── docs/                        ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, AI_JOURNAL.md, claims-flow.html, screenshots/
@@ -436,6 +460,11 @@ com.icmp.claims
 │       ├── persistence/    ClaimRepository, ClaimSpecifications, ClaimFigures (dashboard projection)
 │       ├── messaging/      OutboxEvent, OutboxEventWriter (EventOutboxPort), OutboxRelay, KafkaTopicConfig
 │       └── client/         PolicyCoverageRestAdapter, StaffDirectoryRestAdapter (circuit breakers), RestClientConfig
+├── document/               supporting documents (ADR-013)
+│   ├── api/                ClaimDocumentController (multipart upload, list, streamed download)
+│   ├── application/        DocumentService, DocumentView, DocumentStoragePort
+│   ├── domain/             ClaimDocument, DocumentCategory, FileKind (magic-number detection), EvidencePolicy
+│   └── infrastructure/     ClaimDocumentRepository, S3DocumentStorage (AWS SDK v2)
 ├── stats/                  StatsController, StatsService, StatsViews (exposure, workload)
 ├── config/                 DomainConfig (wires domain services), ClaimsProperties, StaticFxRateConverter
 └── common/                 security/, web/, error/
@@ -451,7 +480,7 @@ tested without a container (`ClaimTest`, `ClaimStatusTest`, `TriagePolicyTest`).
 |---|---|
 | State (transition table) | `ClaimStatus` + `Claim.transition()` |
 | Strategy | `PriorityRule`s (triage), `NotificationTemplates` per event type, `NotificationChannel` (in-app / email stub) |
-| Ports and adapters | `PolicyCoveragePort` ← `PolicyCoverageRestAdapter`, `StaffDirectoryPort` ← `StaffDirectoryRestAdapter`, `EventOutboxPort` ← `OutboxEventWriter` |
+| Ports and adapters | `PolicyCoveragePort` ← `PolicyCoverageRestAdapter`, `StaffDirectoryPort` ← `StaffDirectoryRestAdapter`, `EventOutboxPort` ← `OutboxEventWriter`, `DocumentStoragePort` ← `S3DocumentStorage` |
 | Domain events | `Claim` records `ClaimDomainEvent`s; the application layer drains them into the outbox |
 | Transactional Outbox | `OutboxEventWriter` (same TX) + `OutboxRelay` (scheduled publisher) |
 | Idempotent Consumer | `processed_event` in notification-service and policy-service |
@@ -481,12 +510,15 @@ layer depends on ports, not Kafka/HTTP.
 frontend/projects/
 ├── shell/      host (:4200): login, layout + role-based nav, notification bell (polling store), theme toggle,
 │               loads a remote per role from public/federation.manifest.json; fallback page if a remote is down
-├── claimant/   remote (:4201) exposes ./routes: My claims, Report an incident (3-step wizard), Claim detail
-│               (progress tracker, decision banner, answer questions, withdraw, history)
+├── claimant/   remote (:4201) exposes ./routes: My claims, Report an incident (3-step wizard, photos attached in the
+│               last step), Claim detail (progress tracker, decision banner, answer questions, photos and documents,
+│               withdraw, history)
 ├── staff/      remote (:4202) exposes ./routes: Work queue (tabs, filters, paging, sorting, pick-up), Claim workspace
-│               (details, cover, questions, assessments, action panel, notes, history), Dashboard (exposure, workload)
+│               (details, photos and documents, cover, questions, assessments, action panel, notes, history),
+│               Dashboard (exposure, workload)
 └── shared/     @icmp/shared — federation singleton: API types, typed API clients, AuthStore, auth interceptor,
-                role guards, problem-detail messages, status/priority chips, timeline, pipes, design tokens (_theme.scss)
+                role guards, problem-detail messages, status/priority chips, timeline, pipes, ClaimDocumentsComponent
+                (gallery, viewer, upload; images fetched as blobs with the token), design tokens (_theme.scss)
 ```
 
 * **Two user types, one codebase:** the shell reads the role from the session and lazy-loads only that user's remote
@@ -508,7 +540,7 @@ frontend/projects/
 
 1. Six markets assumed **SG, HK, AU, MY, TH, ID** with local currencies; static FX to USD for reporting.
 2. Claimants are existing policyholders; no self-registration (seeded users). Policies seeded per claimant.
-3. Document/photo upload is out of scope; info requests are text answers (stretch: attachments in object storage).
+3. Photos and documents are stored in an S3-compatible object store (SeaweedFS locally, Amazon S3 in production). There is no virus scanning, image resizing or thumbnail generation yet: thumbnails are the original images, downloaded with the token.
 4. Payment is recorded (reference + amount), not executed — no payments integration.
 5. One team per market is not modelled; "team" = all officers (manager sees all; filter by market).
 6. Officer authority limit USD 25k; above that a manager must approve.
@@ -536,3 +568,4 @@ frontend/projects/
 | 010 | Independent Maven projects per service, cross-cutting code copied, events shared as JSON Schema | multi-module build with shared `platform-commons` / `event-contracts` jars (couples releases) |
 | 011 | Integration tests on real PostgreSQL (Testcontainers) and embedded Kafka | H2 (would hide PostgreSQL-specific SQL such as `jsonb`, sequences, partial indexes) |
 | 012 | Same policy + incident date: refuse (409) while a claim is open, flag for review once one is paid; cap approvals across all claims on the policy, under a per-policy advisory lock | hard block on any second claim that day (a car can be hit twice); unique DB constraint (cannot express "open only" plus the paid-claim flag); trusting policy-service paid-to-date at approval (updated asynchronously, so too late) |
+| 013 | Photos and documents: bytes in S3-compatible object storage, metadata + SHA-256 in claims_db, uploads and downloads proxied through claims-service with the claim's access rules; file type from magic bytes; a damage photo is required before approval | bytes in PostgreSQL `bytea` (bloats backups and the DB); presigned URLs straight to the store (signatures bind the host name, so the browser and the containers would need the same store address; access rules would move into URL expiry; next step at scale); a separate document-service (the approval rule needs the documents in the claim's transaction); MinIO locally (no longer publishes container images, so SeaweedFS) |

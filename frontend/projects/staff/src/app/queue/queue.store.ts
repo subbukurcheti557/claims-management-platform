@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import {
   ClaimStatus,
   ClaimSummary,
@@ -24,10 +24,17 @@ export interface QueueFilters {
 const EMPTY_FILTERS: QueueFilters = { overdueOnly: false, q: '' };
 const SCOPE_KEY = 'icmp.queue.scope';
 
-/** Work-queue state: scope tab, filters, paging and the "pick up" command. */
+/**
+ * Work-queue state: scope tab, filters, paging and the "pick up" command. New claims arrive while the page is open,
+ * so the queue refreshes itself every 30 s and when the browser tab regains focus (quietly, without the loading bar).
+ */
 @Injectable()
 export class QueueStore {
+  static readonly REFRESH_MS = 30_000;
+
   private readonly api = inject(ClaimsApi);
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly onFocus = () => this.refresh();
 
   readonly scope = signal<QueueScope>(QueueStore.readScope());
   readonly filters = signal<QueueFilters>(EMPTY_FILTERS);
@@ -42,15 +49,41 @@ export class QueueStore {
   readonly notice = signal<string | null>(null);
   readonly pickingUp = signal<string | null>(null);
   readonly myStats = signal<OfficerWorkload | null>(null);
+  /** Claims waiting to be picked up, shown on the "To pick up" tab whichever tab is open. */
+  readonly waiting = signal<number | null>(null);
+  readonly lastUpdated = signal<Date | null>(null);
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.stopAutoRefresh());
+  }
+
+  startAutoRefresh(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => this.refresh(), QueueStore.REFRESH_MS);
+    window.addEventListener('focus', this.onFocus);
+  }
+
+  stopAutoRefresh(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    window.removeEventListener('focus', this.onFocus);
+  }
+
+  /** Reloads the current view, the waiting count and my figures without showing the loading bar. */
+  refresh(): void {
+    this.load(true);
+    this.loadMyStats();
+  }
 
   readonly hasFilters = computed(() => {
     const f = this.filters();
     return !!(f.status || f.market || f.priority || f.claimType || f.overdueOnly || f.q);
   });
 
-  load(): void {
-    this.loading.set(true);
+  load(quiet = false): void {
+    if (!quiet) this.loading.set(true);
     this.error.set(null);
+    this.loadWaiting();
     const f = this.filters();
     this.api
       .queue({
@@ -70,12 +103,20 @@ export class QueueStore {
           this.rows.set(page.content);
           this.total.set(page.totalElements);
           this.loading.set(false);
+          this.lastUpdated.set(new Date());
         },
         error: (err: unknown) => {
           this.error.set(errorMessage(err));
           this.loading.set(false);
         },
       });
+  }
+
+  private loadWaiting(): void {
+    this.api.queue({ scope: 'UNASSIGNED', overdueOnly: false, page: 0, size: 1 }).subscribe({
+      next: (page) => this.waiting.set(page.totalElements),
+      error: () => this.waiting.set(null),
+    });
   }
 
   loadMyStats(): void {

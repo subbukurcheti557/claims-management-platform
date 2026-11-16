@@ -8,12 +8,14 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -37,6 +39,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
@@ -55,17 +58,18 @@ import com.icmp.claims.claim.application.port.StaffDirectoryPort.StaffMember;
 import com.icmp.claims.claim.domain.ClaimType;
 import com.icmp.claims.claim.infrastructure.messaging.OutboxEventRepository;
 import com.icmp.claims.common.error.ApiException;
+import com.icmp.claims.support.ObjectStorageTestConfig;
 import com.icmp.claims.support.PostgresTestConfig;
 import com.icmp.claims.support.TestTokens;
 
 /**
- * End-to-end through the HTTP API with a real PostgreSQL and an embedded Kafka broker. The two outbound REST
+ * End-to-end through the HTTP API with a real PostgreSQL, real S3-compatible storage and an embedded Kafka broker. The two outbound REST
  * ports (policy-service, identity-service) are replaced by mocks so each scenario controls their answers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import(PostgresTestConfig.class)
+@Import({PostgresTestConfig.class, ObjectStorageTestConfig.class})
 @EmbeddedKafka(partitions = 1, topics = {"claims.lifecycle.v1"}, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ClaimsApiIntegrationTest {
@@ -155,6 +159,33 @@ class ClaimsApiIntegrationTest {
                 "incidentDate", incidentDate.toString(), "incidentLocation", "Orchard Road",
                 "description", "Rear-ended at the traffic lights on Orchard Road, bumper and boot damaged.",
                 "injuryReported", false, "estimatedLoss", new BigDecimal(estimatedLoss));
+    }
+
+    /** Smallest valid JPEG header plus padding: recognised as a JPEG by its first bytes. */
+    static final byte[] JPEG = jpeg(2048);
+
+    static byte[] jpeg(int size) {
+        byte[] bytes = new byte[size];
+        byte[] header = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 0x10, 0x4A, 0x46, 0x49, 0x46};
+        System.arraycopy(header, 0, bytes, 0, header.length);
+        for (int i = header.length; i < size; i++) {
+            bytes[i] = (byte) (i % 251);
+        }
+        return bytes;
+    }
+
+    private ResultActions upload(String claimId, String token, String category, String fileName, String contentType,
+                                 byte[] content) throws Exception {
+        return mvc.perform(multipart("/api/claims/" + claimId + "/documents")
+                .file(new MockMultipartFile("file", fileName, contentType, content))
+                .param("category", category)
+                .header("Authorization", bearer(token)));
+    }
+
+    /** The claimant adds a damage photo, which approval requires. */
+    private JsonNode uploadPhoto(String claimId) throws Exception {
+        return body(upload(claimId, TestTokens.alice(), "DAMAGE_PHOTO", "rear-bumper.jpg", "image/jpeg", JPEG)
+                .andExpect(status().isCreated()));
     }
 
     private JsonNode submitClaim(String estimatedLoss) throws Exception {
@@ -358,6 +389,7 @@ class ClaimsApiIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("UNDER_REVIEW"))
                     .andExpect(jsonPath("$.infoRequests[0].status").value("ANSWERED"));
+            uploadPhoto(id);
 
             postJson(base + "/notes", TestTokens.olivia(), Map.of("body", "Called the workshop, quote is fair."))
                     .andExpect(status().isCreated());
@@ -389,9 +421,9 @@ class ClaimsApiIntegrationTest {
                     .andExpect(jsonPath("$[*].toStatus").value(org.hamcrest.Matchers.contains("SUBMITTED",
                             "UNDER_REVIEW", "INFO_REQUESTED", "UNDER_REVIEW", "ASSESSED", "APPROVED", "SETTLED")));
 
-            List<String> types = eventsFor(id, 7).stream().map(ClaimsApiIntegrationTest::eventType).toList();
+            List<String> types = eventsFor(id, 8).stream().map(ClaimsApiIntegrationTest::eventType).toList();
             assertThat(types).containsExactly("ClaimSubmitted", "ClaimAssigned", "InfoRequested", "InfoProvided",
-                    "ClaimAssessed", "ClaimApproved", "ClaimSettled");
+                    "DocumentUploaded", "ClaimAssessed", "ClaimApproved", "ClaimSettled");
         }
 
         @Test
@@ -430,6 +462,7 @@ class ClaimsApiIntegrationTest {
             postJson(base + "/assessment", TestTokens.olivia(), Map.of("liability", "ACCEPTED",
                     "recommendedAmount", 45000, "reserveAmount", 45000, "findings", "Total loss confirmed by assessor."))
                     .andExpect(status().isOk());
+            uploadPhoto(id);
             postJson(base + "/approve", TestTokens.olivia(), Map.of("amount", 45000))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("authority limit")));
@@ -554,7 +587,154 @@ class ClaimsApiIntegrationTest {
                     "recommendedAmount", new BigDecimal(amount), "reserveAmount", new BigDecimal(amount),
                     "findings", "Repair quote checked."))
                     .andExpect(status().isOk());
+            uploadPhoto(id);
             return id;
+        }
+    }
+
+    // ------------------------------------------------------------------ Documents (accident photos)
+
+    @Nested
+    class Documents {
+
+        @Test
+        void claimantUploadsAPhotoAndStaffGetTheSameBytesBack() throws Exception {
+            String id = submitClaim("4000").get("id").asText();
+
+            JsonNode doc = body(upload(id, TestTokens.alice(), "DAMAGE_PHOTO", "IMG_2041.JPEG", "image/jpeg", JPEG)
+                    .andExpect(status().isCreated())
+                    .andExpect(header().string("Location", org.hamcrest.Matchers.endsWith("/content")))
+                    .andExpect(jsonPath("$.category").value("DAMAGE_PHOTO"))
+                    .andExpect(jsonPath("$.categoryLabel").value("Damage photo"))
+                    .andExpect(jsonPath("$.fileName").value("IMG_2041.jpg"))
+                    .andExpect(jsonPath("$.contentType").value("image/jpeg"))
+                    .andExpect(jsonPath("$.sizeBytes").value(JPEG.length))
+                    .andExpect(jsonPath("$.uploadedByName").value("Alice Tan"))
+                    .andExpect(jsonPath("$.sha256").doesNotExist()));
+
+            mvc.perform(get("/api/claims/" + id + "/documents").header("Authorization", bearer(TestTokens.alice())))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(1))
+                    .andExpect(jsonPath("$[0].sha256").doesNotExist());
+            mvc.perform(get("/api/claims/" + id + "/documents").header("Authorization", bearer(TestTokens.olivia())))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].sha256").value(org.hamcrest.Matchers.hasLength(64)));
+
+            byte[] downloaded = mvc.perform(get(doc.get("contentUrl").asText())
+                            .header("Authorization", bearer(TestTokens.olivia())))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Content-Type", "image/jpeg"))
+                    .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                    .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.startsWith("inline")))
+                    .andReturn().getResponse().getContentAsByteArray();
+            assertThat(downloaded).isEqualTo(JPEG);
+
+            List<ConsumerRecord<String, String>> events = eventsFor(id, 2);
+            JsonNode uploaded = json.readTree(events.get(1).value());
+            assertThat(uploaded.get("eventType").asText()).isEqualTo("DocumentUploaded");
+            assertThat(uploaded.get("status").asText()).isEqualTo("SUBMITTED");
+            assertThat(uploaded.get("data").get("category").asText()).isEqualTo("DAMAGE_PHOTO");
+            assertThat(uploaded.get("data").get("uploadedByRole").asText()).isEqualTo("CLAIMANT");
+            // a document is not a status change: the claim's version stays the same
+            mvc.perform(get("/api/claims/" + id).header("Authorization", bearer(TestTokens.alice())))
+                    .andExpect(jsonPath("$.version").value(0));
+        }
+
+        @Test
+        void filesThatAreNotPhotosOrPdfsAre415AndNothingIsStored() throws Exception {
+            String id = submitClaim("4000").get("id").asText();
+            byte[] html = "<html><script>alert(1)</script></html>".getBytes(StandardCharsets.UTF_8);
+            byte[] pdf = "%PDF-1.7\nreport".getBytes(StandardCharsets.ISO_8859_1);
+
+            // the browser says image/jpeg and the name ends in .jpg, but the content decides
+            upload(id, TestTokens.alice(), "DAMAGE_PHOTO", "photo.jpg", "image/jpeg", html)
+                    .andExpect(status().isUnsupportedMediaType())
+                    .andExpect(jsonPath("$.title").value("Unsupported file"));
+            upload(id, TestTokens.alice(), "DAMAGE_PHOTO", "scan.pdf", "application/pdf", pdf)
+                    .andExpect(status().isUnsupportedMediaType())
+                    .andExpect(jsonPath("$.detail").value("Damage photos must be JPEG, PNG or WebP images."));
+            upload(id, TestTokens.alice(), "POLICE_REPORT", "scan.pdf", "application/pdf", pdf)
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.contentType").value("application/pdf"));
+            upload(id, TestTokens.alice(), "DAMAGE_PHOTO", "empty.jpg", "image/jpeg", new byte[0])
+                    .andExpect(status().isUnprocessableEntity());
+            upload(id, TestTokens.alice(), "DAMAGE_PHOTO", "huge.jpg", "image/jpeg", jpeg(10 * 1024 * 1024 + 1))
+                    .andExpect(status().isPayloadTooLarge());
+            upload(id, TestTokens.alice(), "SELFIE", "a.jpg", "image/jpeg", JPEG)
+                    .andExpect(status().isBadRequest());
+
+            mvc.perform(get("/api/claims/" + id + "/documents").header("Authorization", bearer(TestTokens.olivia())))
+                    .andExpect(jsonPath("$.length()").value(1));
+        }
+
+        @Test
+        void otherClaimantsCannotSeeOrAddDocuments() throws Exception {
+            String id = submitClaim("4000").get("id").asText();
+            JsonNode doc = uploadPhoto(id);
+
+            mvc.perform(get("/api/claims/" + id + "/documents").header("Authorization", bearer(TestTokens.bob())))
+                    .andExpect(status().isNotFound());
+            mvc.perform(get(doc.get("contentUrl").asText()).header("Authorization", bearer(TestTokens.bob())))
+                    .andExpect(status().isNotFound());
+            upload(id, TestTokens.bob(), "DAMAGE_PHOTO", "a.jpg", "image/jpeg", JPEG)
+                    .andExpect(status().isNotFound());
+            mvc.perform(get("/api/claims/" + id + "/documents")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void staffDocumentsAreInternalAndOnlyTheHandlerCanAddThem() throws Exception {
+            String id = submitClaim("4000").get("id").asText();
+            byte[] pdf = "%PDF-1.7\nassessor report".getBytes(StandardCharsets.ISO_8859_1);
+
+            // not picked up yet: an officer cannot add to it
+            upload(id, TestTokens.olivia(), "OTHER", "assessor.pdf", "application/pdf", pdf)
+                    .andExpect(status().isForbidden());
+            postJson("/api/claims/" + id + "/assign", TestTokens.olivia(), Map.of()).andExpect(status().isOk());
+            JsonNode internal = body(upload(id, TestTokens.olivia(), "OTHER", "assessor.pdf", "application/pdf", pdf)
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.uploadedByRole").value("CLAIMS_OFFICER")));
+            upload(id, TestTokens.omar(), "OTHER", "x.pdf", "application/pdf", pdf).andExpect(status().isForbidden());
+
+            mvc.perform(get("/api/claims/" + id + "/documents").header("Authorization", bearer(TestTokens.alice())))
+                    .andExpect(jsonPath("$.length()").value(0));
+            mvc.perform(get(internal.get("contentUrl").asText()).header("Authorization", bearer(TestTokens.alice())))
+                    .andExpect(status().isNotFound());
+            mvc.perform(get("/api/claims/" + id + "/documents").header("Authorization", bearer(TestTokens.omar())))
+                    .andExpect(jsonPath("$.length()").value(1));
+        }
+
+        @Test
+        void approvalNeedsADamagePhotoAndTheRefusalChangesNothing() throws Exception {
+            String id = submitClaim("4000").get("id").asText();
+            String base = "/api/claims/" + id;
+            postJson(base + "/assign", TestTokens.olivia(), Map.of()).andExpect(status().isOk());
+            postJson(base + "/assessment", TestTokens.olivia(), Map.of("liability", "ACCEPTED",
+                    "recommendedAmount", 3500, "reserveAmount", 3500, "findings", "Workshop quote looks fair."))
+                    .andExpect(status().isOk());
+            long version = body(mvc.perform(get(base).header("Authorization", bearer(TestTokens.olivia()))))
+                    .get("version").asLong();
+
+            postJson(base + "/approve", TestTokens.olivia(), Map.of("amount", 3500))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("has no damage photos")));
+            mvc.perform(get(base).header("Authorization", bearer(TestTokens.olivia())))
+                    .andExpect(jsonPath("$.status").value("ASSESSED"))
+                    .andExpect(jsonPath("$.version").value(version));
+
+            // a police report is not a photo of the damage
+            upload(id, TestTokens.alice(), "POLICE_REPORT", "report.pdf", "application/pdf",
+                    "%PDF-1.4\n".getBytes(StandardCharsets.ISO_8859_1)).andExpect(status().isCreated());
+            postJson(base + "/approve", TestTokens.olivia(), Map.of("amount", 3500))
+                    .andExpect(status().isUnprocessableEntity());
+
+            uploadPhoto(id);
+            postJson(base + "/approve", TestTokens.olivia(), Map.of("amount", 3500))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("APPROVED"));
+            // after the decision the claimant can no longer add evidence
+            upload(id, TestTokens.alice(), "DAMAGE_PHOTO", "late.jpg", "image/jpeg", JPEG)
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("because it is APPROVED")));
         }
     }
 

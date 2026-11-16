@@ -76,3 +76,50 @@
     grid-template-columns: 1fr;
   }
 }
+
+.photos {
+  margin: 8px 0 16px;
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 1rem;
+  }
+  p {
+    margin: 0 0 10px;
+    font-size: 0.875rem;
+  }
+  button .material-symbols-outlined {
+    margin-right: 6px;
+    font-size: 20px;
+  }
+}
+
+.file-input {
+  display: none;
+}
+
+.photo-problem {
+  color: var(--icmp-tone-danger-fg);
+}
+
+.photo-list {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+  }
+  .photo-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

@@ -15,6 +15,12 @@
           <p>Your cover was confirmed. We will notify you here as your claim moves forward.</p>
         </div>
       </div>
+      @if (photosFailed()) {
+        <div class="icmp-banner submitted" data-tone="warning" role="alert">
+          <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+          <p>{{ photosFailed() }} photo(s) could not be uploaded. Please add them again under Photos and documents.</p>
+        </div>
+      }
     }
 
     <header class="head">
@@ -97,6 +103,7 @@
               <span class="material-symbols-outlined" aria-hidden="true">assignment_late</span>
               Your claims officer needs information
             </h2>
+            <p class="icmp-muted meta">If you are asked for photos or a report, add them under Photos and documents below.</p>
             @for (r of store.openRequests(); track r.id) {
               <div class="request">
                 <p class="question">{{ r.question }}</p>
@@ -148,6 +155,21 @@
             <dt>Reported</dt>
             <dd>{{ c.submittedAt | date: 'd MMM y, HH:mm' }}</dd>
           </dl>
+        </section>
+
+        <section class="icmp-card" aria-labelledby="docs-title" data-testid="claim-documents">
+          <h2 id="docs-title">Photos and documents</h2>
+          @if (store.canAddDocuments()) {
+            <p class="icmp-muted docs-intro">
+              Photos of the damage help your claims officer decide faster. You can also add a police report or a
+              repair estimate.
+            </p>
+          }
+          <icmp-claim-documents
+            [claimId]="c.id"
+            [canUpload]="store.canAddDocuments()"
+            [emptyText]="store.canAddDocuments() ? 'You have not added any photos yet.' : 'No photos or documents were added.'"
+          />
         </section>
 
         @if (store.answeredRequests().length > 0) {

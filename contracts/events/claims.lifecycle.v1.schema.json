@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://icmp.example/contracts/events/claims.lifecycle.v1.schema.json",
   "title": "ClaimLifecycleEvent v1",
-  "description": "Published by claims-service on topic claims.lifecycle.v1 (key = claimId) for every claim state change. Consumers must ignore unknown fields (tolerant reader) and de-duplicate by eventId (delivery is at-least-once). A breaking change is published on a new topic (claims.lifecycle.v2).",
+  "description": "Published by claims-service on topic claims.lifecycle.v1 (key = claimId) for every claim state change, and when a supporting document is added (DocumentUploaded, status unchanged). Consumers must ignore unknown fields (tolerant reader) and de-duplicate by eventId (delivery is at-least-once). A breaking change is published on a new topic (claims.lifecycle.v2).",
   "type": "object",
   "required": ["eventId", "eventType", "schemaVersion", "occurredAt", "claimId", "claimNumber", "policyNumber",
                "claimantId", "market", "currency", "status", "actorId", "data"],
@@ -11,7 +11,7 @@
     "eventType": {
       "type": "string",
       "enum": ["ClaimSubmitted", "ClaimAssigned", "InfoRequested", "InfoProvided", "ClaimAssessed",
-               "ClaimApproved", "ClaimSettled", "ClaimRejected", "ClaimWithdrawn"]
+               "ClaimApproved", "ClaimSettled", "ClaimRejected", "ClaimWithdrawn", "DocumentUploaded"]
     },
     "schemaVersion": { "const": 1 },
     "occurredAt": { "type": "string", "format": "date-time" },
@@ -46,7 +46,9 @@
     { "if": { "properties": { "eventType": { "const": "ClaimSettled" } } },
       "then": { "properties": { "data": { "$ref": "#/$defs/ClaimSettled" } } } },
     { "if": { "properties": { "eventType": { "const": "ClaimRejected" } } },
-      "then": { "properties": { "data": { "$ref": "#/$defs/ClaimRejected" } } } }
+      "then": { "properties": { "data": { "$ref": "#/$defs/ClaimRejected" } } } },
+    { "if": { "properties": { "eventType": { "const": "DocumentUploaded" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/DocumentUploaded" } } } }
   ],
   "$defs": {
     "ClaimSubmitted": { "type": "object", "required": ["claimType", "estimatedLoss", "priority"],
@@ -69,6 +71,14 @@
       "properties": { "amount": { "type": "number" }, "paymentReference": { "type": "string" } } },
     "ClaimRejected": { "type": "object", "required": ["reasonCode", "explanation"],
       "properties": { "reasonCode": { "type": "string" }, "reasonDescription": { "type": "string" },
-        "explanation": { "type": "string" } } }
+        "explanation": { "type": "string" } } },
+    "DocumentUploaded": { "type": "object", "required": ["documentId", "category", "fileName", "uploadedByRole"],
+      "description": "Metadata only; the file itself is fetched from claims-service with a token, never put on Kafka.",
+      "properties": { "documentId": { "type": "string", "format": "uuid" },
+        "category": { "enum": ["DAMAGE_PHOTO", "POLICE_REPORT", "REPAIR_ESTIMATE", "MEDICAL_REPORT", "OTHER"] },
+        "categoryLabel": { "type": "string" }, "fileName": { "type": "string" },
+        "contentType": { "enum": ["image/jpeg", "image/png", "image/webp", "application/pdf"] },
+        "sizeBytes": { "type": "integer" },
+        "uploadedByRole": { "enum": ["CLAIMANT", "CLAIMS_OFFICER", "CLAIMS_MANAGER"] } } }
   }
 }

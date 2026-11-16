@@ -3,7 +3,15 @@
     eyebrow="Claims desk"
     title="Work queue"
     subtitle="Oldest SLA first. Pick up new claims, and keep an eye on anything overdue."
-  />
+  >
+    @if (store.lastUpdated(); as updated) {
+      <span class="icmp-muted updated" aria-live="polite">Updated {{ updated | date: 'HH:mm:ss' }}</span>
+    }
+    <button mat-stroked-button type="button" (click)="store.refresh()" data-testid="queue-refresh">
+      <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+      Refresh
+    </button>
+  </icmp-page-header>
 
   @if (store.myStats(); as s) {
     <section class="mine" aria-label="My workload">
@@ -46,6 +54,9 @@
         <ng-template mat-tab-label>
           <span class="material-symbols-outlined tab-icon" aria-hidden="true">{{ s.icon }}</span>
           {{ s.label }}
+          @if (s.value === 'UNASSIGNED' && store.waiting()) {
+            <span class="waiting" [attr.aria-label]="store.waiting() + ' waiting'" data-testid="waiting-count">{{ store.waiting() }}</span>
+          }
         </ng-template>
       </mat-tab>
     }

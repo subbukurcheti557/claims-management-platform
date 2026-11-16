@@ -1,4 +1,4 @@
-import { provideHttpClient } from '@angular/common/http';
+import { HttpRequest, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
@@ -63,11 +63,17 @@ const claim = (patch: Partial<ClaimDetail> = {}): ClaimDetail =>
 describe('QueueStore', () => {
   beforeEach(() => localStorage.clear());
 
+  const QUEUE = `${API}/api/claims/queue`;
+  /** The page of the open tab (the waiting-count request asks for a single row). */
+  const view = (r: HttpRequest<unknown>) => r.url === QUEUE && r.params.get('size') !== '1';
+  const waitingCount = (r: HttpRequest<unknown>) => r.url === QUEUE && r.params.get('size') === '1';
+
   it('queries the queue with scope, filters and paging', () => {
     const http = configure([QueueStore]);
     const store = TestBed.inject(QueueStore);
     store.setFilters({ market: 'TH', overdueOnly: true, q: ' CLM ' });
-    const req = http.expectOne((r) => r.url === `${API}/api/claims/queue`);
+    http.expectOne(waitingCount).flush({ content: [], totalElements: 4 });
+    const req = http.expectOne(view);
     expect(req.request.params.get('scope')).toBe('UNASSIGNED');
     expect(req.request.params.get('market')).toBe('TH');
     expect(req.request.params.get('overdueOnly')).toBe('true');
@@ -76,12 +82,50 @@ describe('QueueStore', () => {
     req.flush({ content: [{ id: '1' }], totalElements: 1 });
     expect(store.rows()).toHaveLength(1);
     expect(store.hasFilters()).toBe(true);
+    expect(store.waiting()).toBe(4);
+  });
+
+  it('counts the claims waiting to be picked up, whichever tab is open', () => {
+    const http = configure([QueueStore]);
+    const store = TestBed.inject(QueueStore);
+    store.setScope('MINE');
+    const count = http.expectOne(waitingCount);
+    expect(count.request.params.get('scope')).toBe('UNASSIGNED');
+    count.flush({ content: [], totalElements: 3 });
+    expect(http.expectOne(view).request.params.get('scope')).toBe('MINE');
+    expect(store.waiting()).toBe(3);
+  });
+
+  it('refreshes itself so new claims appear without reloading the page', () => {
+    vi.useFakeTimers();
+    try {
+      const http = configure([QueueStore]);
+      const store = TestBed.inject(QueueStore);
+      store.startAutoRefresh();
+      vi.advanceTimersByTime(QueueStore.REFRESH_MS);
+      expect(store.loading()).toBe(false); // quiet: no loading bar
+      http.expectOne(waitingCount).flush({ content: [], totalElements: 1 });
+      http.expectOne(view).flush({ content: [{ id: 'new' }], totalElements: 1 });
+      http.expectOne(`${API}/api/claims/stats/me`).flush({});
+      expect(store.rows()).toHaveLength(1);
+      expect(store.lastUpdated()).not.toBeNull();
+
+      window.dispatchEvent(new Event('focus'));
+      expect(http.match(view)).toHaveLength(1);
+
+      store.stopAutoRefresh();
+      http.match(() => true).forEach((r) => r.flush({ content: [], totalElements: 0 }));
+      vi.advanceTimersByTime(QueueStore.REFRESH_MS * 2);
+      http.verify();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('remembers the chosen tab', () => {
     const http = configure([QueueStore]);
     TestBed.inject(QueueStore).setScope('MINE');
-    http.expectOne((r) => r.url === `${API}/api/claims/queue`).flush({ content: [], totalElements: 0 });
+    http.expectOne(view).flush({ content: [], totalElements: 0 });
     expect(localStorage.getItem('icmp.queue.scope')).toBe('MINE');
   });
 
@@ -98,7 +142,7 @@ describe('QueueStore', () => {
 
     expect(opened).not.toHaveBeenCalled();
     expect(store.notice()).toContain('CLM-9 was just picked up by a colleague');
-    http.expectOne((r) => r.url === `${API}/api/claims/queue`).flush({ content: [], totalElements: 0 });
+    http.expectOne(view).flush({ content: [], totalElements: 0 });
   });
 });
 

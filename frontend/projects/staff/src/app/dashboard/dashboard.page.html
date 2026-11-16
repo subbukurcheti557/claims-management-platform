@@ -17,6 +17,13 @@
       <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
       Refresh
     </button>
+    <button mat-stroked-button type="button" (click)="store.load()" data-testid="dashboard-refresh">
+      <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+      Refresh
+    </button>
+    @if (store.lastUpdated(); as updated) {
+      <span class="icmp-muted updated" aria-live="polite">Updated {{ updated | date: 'HH:mm:ss' }}</span>
+    }
   </icmp-page-header>
 
   <icmp-load-state [loading]="store.loading() && !store.exposure()" [error]="store.error()" (retry)="store.load()" />

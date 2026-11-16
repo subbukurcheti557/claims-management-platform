@@ -95,6 +95,27 @@ class NotificationTemplatesTest {
     }
 
     @Test
+    void claimantEvidenceIsAnActionForTheAssignedOfficer() {
+        ObjectNode data = JSON.createObjectNode().put("uploadedByRole", "CLAIMANT").put("categoryLabel", "Damage photo")
+                .put("fileName", "rear-bumper.jpg");
+        assertThat(NotificationTemplates.render(event("DocumentUploaded", OFFICER, CLAIMANT, data)))
+                .singleElement().satisfies(d -> {
+                    assertThat(d.recipientUserId()).isEqualTo(OFFICER);
+                    assertThat(d.category()).isEqualTo(Category.ACTION_REQUIRED);
+                    assertThat(d.title()).isEqualTo("New evidence on CLM-SG-2026-000100");
+                    assertThat(d.message()).contains("uploaded a damage photo (rear-bumper.jpg)");
+                });
+    }
+
+    @Test
+    void staffUploadsAndUnassignedClaimsNotifyNobody() {
+        ObjectNode byStaff = JSON.createObjectNode().put("uploadedByRole", "CLAIMS_OFFICER").put("fileName", "a.pdf");
+        assertThat(NotificationTemplates.render(event("DocumentUploaded", OFFICER, OFFICER, byStaff))).isEmpty();
+        ObjectNode byClaimant = JSON.createObjectNode().put("uploadedByRole", "CLAIMANT").put("fileName", "a.jpg");
+        assertThat(NotificationTemplates.render(event("DocumentUploaded", null, CLAIMANT, byClaimant))).isEmpty();
+    }
+
+    @Test
     void internalAndUnknownEventsProduceNothing() {
         assertThat(NotificationTemplates.render(event("ClaimAssessed", OFFICER, OFFICER, JSON.createObjectNode())))
                 .isEmpty();

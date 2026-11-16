@@ -48,8 +48,24 @@ test.describe('Claims staff', () => {
     await page.getByRole('button', { name: 'Record assessment' }).click();
     await expect(page.getByLabel('Status: Assessed')).toBeVisible();
 
+    // --- No damage photo yet: approval is blocked until the claimant sends one
+    await page.getByRole('radio', { name: 'Approve' }).click();
+    await expect(page.getByTestId('no-photos')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve claim' })).toBeDisabled();
+    await alice.uploadDamagePhoto(claim.id);
+    await page.reload();
+
+    // --- The officer looks at the photo full size
+    const evidence = page.getByTestId('claim-documents');
+    await expect(evidence.getByRole('img', { name: 'Damage photo: damaged-door.jpg' })).toBeVisible();
+    await evidence.getByRole('button', { name: 'Open damaged-door.jpg' }).click();
+    await expect(page.getByRole('dialog', { name: 'damaged-door.jpg' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toBeHidden();
+
     // --- Approve (within authority) and record payment
     await page.getByRole('radio', { name: 'Approve' }).click();
+    await expect(page.getByTestId('no-photos')).toBeHidden();
     await expect(page.getByLabel('Amount to approve')).toHaveValue('2700');
     await page.getByRole('button', { name: 'Approve claim' }).click();
     await expect(page.getByLabel('Status: Approved')).toBeVisible();
@@ -81,6 +97,7 @@ test.describe('Claims staff', () => {
       reserveAmount: 40000,
       findings: 'Write-off confirmed by the assessor.',
     });
+    await alice.uploadDamagePhoto(claim.id);
 
     await signInWithDemo(page, /Olivia Lim/);
     await page.goto(`/staff/claims/${claim.id}`);

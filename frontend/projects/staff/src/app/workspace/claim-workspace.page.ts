@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, effect, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -7,6 +7,7 @@ import { MatInputModule } from '@angular/material/input';
 import { RouterLink } from '@angular/router';
 import {
   AuthStore,
+  ClaimDocumentsComponent,
   EnumLabelPipe,
   LoadStateComponent,
   MARKET_NAMES,
@@ -24,6 +25,7 @@ import { WorkspaceStore } from './workspace.store';
   selector: 'staff-claim-workspace',
   imports: [
     ActionPanelComponent,
+    ClaimDocumentsComponent,
     DatePipe,
     EnumLabelPipe,
     FormsModule,
@@ -48,6 +50,12 @@ export class ClaimWorkspacePage {
   protected readonly auth = inject(AuthStore);
   protected readonly marketNames = MARKET_NAMES;
   protected readonly noteText = signal('');
+  protected readonly damagePhotos = signal<number | null>(null);
+  /** Staff add documents (e.g. an assessor report) to open claims they handle; these stay internal. */
+  protected readonly canAddDocuments = computed(() => {
+    const c = this.store.claim();
+    return !!c && this.store.canHandle() && !c.closedAt;
+  });
 
   readonly id = input.required<string>();
 

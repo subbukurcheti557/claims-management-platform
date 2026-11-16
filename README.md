@@ -37,7 +37,7 @@ claims-management-platform/
 ├── contracts/
 │   ├── openapi/                 exported OpenAPI spec of each service
 │   └── events/                  claims.lifecycle.v1.schema.json (the Kafka contract)
-├── infra/postgres/              init script: 4 databases, 4 logins
+├── infra/                       postgres/ init script (4 databases, 4 logins); seaweedfs/ S3 credentials
 ├── scripts/                     build-all.sh, e2e-smoke.mjs, verify-fresh-stack.sh
 ├── docker-compose.yml           whole stack, run from the repository root
 └── docs/                        ARCHITECTURE.md, IMPLEMENTATION_PLAN.md, AI_JOURNAL.md, claims-flow.html, screenshots/
@@ -63,6 +63,7 @@ The first start takes about 1–2 minutes while the services register with Eurek
 | http://localhost:4200 | The application (shell). Micro-frontends are served from :4201 (claimant) and :4202 (staff) |
 | http://localhost:8080 | API gateway (the only backend address the browser uses) |
 | http://localhost:8761 | Eureka dashboard |
+| http://localhost:8333 | Object storage for claim photos and documents (SeaweedFS, S3 API; files are only reachable through claims-service) |
 | http://localhost:8089 | Kafka UI (optional: `docker compose --profile tools up -d kafka-ui`) |
 | http://localhost:808{1..4}/swagger-ui.html | Swagger UI of each service, reachable from inside the Docker network (`docker exec`) or when run locally |
 
@@ -102,15 +103,19 @@ cd frontend && npm ci && npm run start:all                 # shell :4200 + remot
   (inactive policy, incident outside the policy period, wrong product, someone else's policy).
 - Sees all their claims with a plain-language status, a progress tracker, the full history and the decision.
 - Answers the claims officer's questions; the claim goes back to review once every question is answered.
+- Adds photos of the damage while reporting, and later photos, a police report or a repair estimate (JPEG, PNG,
+  WebP or PDF, up to 10 MB) until the claim is decided.
 - Withdraws a claim before it is assessed. Receives in-app notifications for every step that concerns them.
 
 **Claims officer (staff micro-frontend)**
 - Work queue with tabs (to pick up, mine, all open, search all), filters (market, priority, status, overdue, text),
   sorting, paging and SLA indicators. Picking up uses optimistic locking: if two officers click at once, one wins and
-  the other is told.
-- Claim workspace: incident, cover at the time of report, questions and answers, assessments, internal notes, history.
-  The action panel offers only what the status allows: ask the claimant, assess (liability, recommended amount,
-  reserve), approve (with the authority limit shown), record payment, reject with a reason the claimant can read.
+  the other is told. The queue and the manager dashboard refresh every 30 s and when the tab regains focus, and the
+  "To pick up" tab shows how many claims are waiting.
+- Claim workspace: incident, photos and documents (gallery with a full-size viewer), cover at the time of report,
+  questions and answers, assessments, internal notes, history. The action panel offers only what the status allows:
+  ask the claimant, assess (liability, recommended amount, reserve), approve (with the authority limit shown, and only
+  once there is at least one damage photo), record payment, reject with a reason the claimant can read.
 - Own workload figures: open, overdue, high priority, closed in 30 days, average days to close.
 
 **Claims manager**
@@ -124,23 +129,25 @@ cd frontend && npm ci && npm run start:all                 # shell :4200 + remot
 - JWT checked at the gateway **and** in every service; role checks per endpoint; claimants can only see their own
   claims (a foreign claim returns 404); RFC 7807 errors with a correlation id everywhere.
 - One PostgreSQL database and login per service, Flyway migrations, health checks, Docker Compose for everything.
+- Photos and documents in S3-compatible object storage (SeaweedFS locally), checked by their content, streamed
+  through claims-service with the claim's access rules, and announced on Kafka as `DocumentUploaded`.
 
 ---
 
-## Tests (all run and passing on 15 Nov 2026)
+## Tests (all run and passing on 16 Nov 2026)
 
 | Suite | Count | What it proves |
 |---|---|---|
 | api-gateway | 5 | 401 without/forged token, `/internal/**` blocked, CORS preflight, health |
 | identity-service | 9 | Login, token claims, same 401 for wrong password and unknown user, validation, role rules |
 | policy-service | 15 | Coverage rules; ClaimSettled applied once even when delivered twice; malformed event → DLT |
-| claims-service | 88 | All 64 status pairs of the state machine; aggregate rules; duplicate-claim rule and policy-wide payout limit; triage; circuit breaker (404 is not a failure, 5xx opens the circuit); full HTTP lifecycle with all 7 events checked on Kafka in order; 409 on concurrent pick-up; authority limit; access rules; dashboard totals |
-| notification-service | 14 | Who is notified for each event; exactly once per event; users only see their own |
-| Frontend unit (Vitest) | 37 | Auth store, interceptor and guards; pipes; chips; every feature store; action panel rules |
+| claims-service | 107 | All 64 status pairs of the state machine; aggregate rules; duplicate-claim rule and policy-wide payout limit; triage; circuit breaker (404 is not a failure, 5xx opens the circuit); photo and document rules (type from the file content, size, who may add and see, damage photo before approval) against real S3-compatible storage; full HTTP lifecycle with all 8 events checked on Kafka in order; 409 on concurrent pick-up; authority limit; access rules; dashboard totals |
+| notification-service | 16 | Who is notified for each event (including new evidence from the claimant); exactly once per event; users only see their own |
+| Frontend unit (Vitest) | 45 | Auth store, interceptor and guards; pipes; chips; every feature store; action panel rules; photo checks and the documents store |
 | API smoke (`scripts/e2e-smoke.mjs`) | 38 checks | The whole business flow through the gateway against the running stack, including both Kafka consumers |
-| Browser e2e (Playwright) | 6 | Claimant wizard; officer lifecycle to payment; authority limit; manager dashboard; access; theme |
+| Browser e2e (Playwright) | 6 | Claimant wizard with a photo; officer lifecycle to payment, blocked until a damage photo arrives; authority limit; manager dashboard; access; theme |
 
-Backend integration tests use real PostgreSQL 16 (Testcontainers) and an embedded Kafka broker, so Docker must be running.
+Backend integration tests use real PostgreSQL 16 and SeaweedFS (Testcontainers) and an embedded Kafka broker, so Docker must be running.
 
 ```bash
 cd backend/services/claims-service && mvn verify # any service
@@ -154,7 +161,9 @@ cd frontend && npx playwright install chromium && npx playwright test
 
 ## Known limitations and next steps
 
-- Document and photo upload is not built; information requests take text answers.
+- Photos and documents: no virus scanning, image resizing or server-side thumbnails yet, and uploads go through
+  claims-service (fine at 10 MB per file; presigned URLs straight to S3 would be the next step at scale). The stored
+  SHA-256 could flag the same photo reused on another claim.
 - Payments are recorded, not executed. Email and SMS are a logged stub behind a `NotificationChannel`.
 - FX rates are static configuration. HS256 shared-secret JWT without refresh tokens; production would use an identity
   provider with RS256/JWKS.

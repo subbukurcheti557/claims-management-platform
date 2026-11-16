@@ -10,7 +10,8 @@ import com.icmp.notification.notification.domain.Notification.Category;
 
 /**
  * Who is told what for each claim event (Strategy: one template per event type). Events without a template,
- * such as ClaimAssessed, are internal and produce no notification.
+ * such as ClaimAssessed, are internal and produce no notification. Map.of takes at most 10 entries; switch to
+ * Map.ofEntries when adding more.
  */
 public final class NotificationTemplates {
 
@@ -33,7 +34,8 @@ public final class NotificationTemplates {
                     "Claim " + e.claimNumber() + " was not approved. " + Objects.toString(e.text("reasonDescription"), "")
                             + " " + Objects.toString(e.text("explanation"), ""))),
             "ClaimWithdrawn", e -> toOfficer(e, Category.INFO, "Claim withdrawn",
-                    "The claimant withdrew claim " + e.claimNumber() + "."));
+                    "The claimant withdrew claim " + e.claimNumber() + "."),
+            "DocumentUploaded", NotificationTemplates::documentUploaded);
 
     private NotificationTemplates() {
     }
@@ -56,6 +58,16 @@ public final class NotificationTemplates {
                     "Claim assigned to you", "Claim " + e.claimNumber() + " has been assigned to you."));
         }
         return drafts;
+    }
+
+    /** New evidence from the claimant is something the officer should look at; staff uploads are internal. */
+    private static List<NotificationDraft> documentUploaded(ClaimEvent e) {
+        if (!"CLAIMANT".equals(e.text("uploadedByRole"))) {
+            return List.of();
+        }
+        String what = Objects.toString(e.text("categoryLabel"), "document").toLowerCase(java.util.Locale.ROOT);
+        return toOfficer(e, Category.ACTION_REQUIRED, "New evidence on " + e.claimNumber(),
+                "The claimant uploaded a " + what + " (" + e.text("fileName") + ") to claim " + e.claimNumber() + ".");
     }
 
     private static NotificationDraft toClaimant(ClaimEvent e, Category category, String title, String message) {
