@@ -177,6 +177,41 @@ uploads a damage photo first. The manual test guide's test 12 now shows the 422 
 
 ---
 
+## Entry 10 — Developer overrode: micro-frontends replaced by one Angular app (branch `single-spa`)
+
+**Asked:** "Convert the front end as a single application instead of micro front end." This came up while debugging
+locally: running three dev servers (:4200, :4201, :4202) to step through one flow was slow and confusing.
+
+**AI pushed back first:** the rubric gives *MFE architecture* 15 points, and ADR-003 had rejected a single SPA for that
+reason. It offered three options: keep MFEs and add a one-server dev mode, convert on a separate branch, or convert on
+main.
+
+**Developer decided:** convert on a new branch, `single-spa`, so `main` keeps the federation version and the two can be
+compared before choosing what to submit.
+
+**AI did:**
+- Moved the shell, both remotes and the shared library into one Angular project (`frontend/src/app/`: `claimant/`,
+  `staff/`, `shared/`) with `git mv`, so history follows the files. `@icmp/shared` is now a tsconfig path to a folder,
+  not a library, so no import in any component changed.
+- The shell's `loadRemoteModule(...)` became plain `import('./claimant/claimant.routes')`: still lazy, still guarded by
+  role. Removed the federation configs, the remote manifest, the "area unavailable" fallback, the remotes' standalone
+  frames, and four packages (`@angular-architects/native-federation`, its orchestrator, `es-module-shims`,
+  `ng-packagr`).
+- One nginx site on :4200 instead of three; compose and the gateway's CORS list no longer mention :4201/:4202.
+
+**Problems on the way:** Windows refused to rename `projects/shared/src/lib` (a process held the folder) and the
+script went on to delete it. The files were restored from git into the new location and compared byte for byte.
+
+**Evidence:** `ng build` succeeds; 45/45 unit tests pass (same 6 files and count as before the change); a browser check
+signed in as a claimant, an officer and a manager, each reached their area with every file served from :4200 and no
+console errors. The initial bundle is now 766 kB raw / 166 kB transferred, because Angular and Material are no longer
+separate federation files; the warning budget was raised from 500 kB to 800 kB (the 1 MB error limit is unchanged).
+
+**Trade-off accepted:** simpler builds, one dev server and easy debugging, in exchange for the MFE rubric story
+(independent deployment per area). Recorded as ADR-014.
+
+---
+
 ## Verification evidence
 
 - Backend: 131 tests pass (gateway 5, identity 9, policy 15, claims 88, notification 14), on real PostgreSQL and

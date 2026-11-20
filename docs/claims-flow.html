@@ -100,7 +100,7 @@ td .mono{white-space:nowrap}
 
 <section id="about" style="display:flex;flex-direction:column;gap:14px">
   <h2>What this project is</h2>
-  <p>An <b>insurance claims management platform</b> for an APAC insurer that handles <b>motor and property claims across six markets</b> (Singapore, Hong Kong, Australia, Malaysia, Thailand, Indonesia). It is a full-stack web application: Java Spring Boot microservices behind an API gateway, Kafka for events, PostgreSQL with one database per service, and one Angular application split into micro-frontends.</p>
+  <p>An <b>insurance claims management platform</b> for an APAC insurer that handles <b>motor and property claims across six markets</b> (Singapore, Hong Kong, Australia, Malaysia, Thailand, Indonesia). It is a full-stack web application: Java Spring Boot microservices behind an API gateway, Kafka for events, PostgreSQL with one database per service, and one Angular single-page application with separate, lazily loaded areas for claimants and staff.</p>
   <div class="fail">
     <div><strong>The problem today</strong><p>Claimants report by phone or email and get no visibility afterwards. Claims staff work from shared inboxes and spreadsheets with no view of their workload. Managers have no real-time picture of outstanding claims or how much money the company owes on them.</p></div>
     <div><strong>What the platform changes</strong><p>Claimants report and track claims online. Every claim follows one controlled lifecycle with an audit trail. Staff get a prioritised work queue. Managers see workload and liability exposure live.</p></div>
@@ -140,7 +140,7 @@ td .mono{white-space:nowrap}
   <div class="tbl"><table>
     <thead><tr><th>Layer</th><th>Choice</th></tr></thead>
     <tbody>
-      <tr><td>Frontend</td><td>Angular, Native Federation micro-frontends: shell + claimant app + staff app + shared library; Angular Material; signal-based state</td></tr>
+      <tr><td>Frontend</td><td>Angular single-page app: claimant area + staff area (lazy-loaded by role) + shared folder; Angular Material; signal-based state</td></tr>
       <tr><td>Edge</td><td>Spring Cloud Gateway, Eureka service discovery</td></tr>
       <tr><td>Services</td><td>Java 17, Spring Boot 3: identity, policy, claims, notification. Each built and deployed on its own</td></tr>
       <tr><td>Messaging</td><td>Apache Kafka, topic <code>claims.lifecycle.v1</code> with a JSON Schema contract</td></tr>
@@ -234,7 +234,7 @@ flowchart LR
       <li>Browser sends <code>POST /api/auth/login</code> with email and password to the gateway. This is the only public route.</li>
       <li>Gateway forwards to identity-service, which finds the user and checks the password against the BCrypt hash.</li>
       <li>identity-service returns a JWT containing user id, name, role <code>CLAIMANT</code> and market <code>SG</code>, valid for 60 minutes.</li>
-      <li>The Angular shell stores the token, reads the role and loads the claimant micro-frontend.</li>
+      <li>The Angular app stores the token, reads the role and loads the claimant area.</li>
     </ol>
     <div class="tables"><div><span class="chip rd">READ</span><code>app_user</code><span class="db">identity_db</span></div></div>
   </div></div>
@@ -318,7 +318,7 @@ flowchart LR
   <div class="lanes"><div class="lane s single">
     <h4>While the user waits</h4>
     <ol>
-      <li>Olivia logs in (same as step 1). The shell sees role CLAIMS_OFFICER and loads the staff micro-frontend.</li>
+      <li>Olivia logs in (same as step 1). The app sees role CLAIMS_OFFICER and loads the staff area.</li>
       <li><code>GET /api/claims/queue?scope=UNASSIGNED&amp;sort=slaDueAt</code>. Filters are built with JPA Specifications (status, market, priority).</li>
       <li>Alice's claim appears with priority and an SLA chip "due in 2 days".</li>
     </ol>

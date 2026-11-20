@@ -26,7 +26,7 @@ done
 
 if [[ $FRONTEND -eq 1 ]]; then
   echo "==> Building frontend"
-  (cd "$ROOT/frontend" && npm ci --no-audit --no-fund && npm run build:all)
+  (cd "$ROOT/frontend" && npm ci --no-audit --no-fund && npm run build)
 fi
 
 echo "Build complete. Start with: docker compose up -d --build   (add --profile frontend for the UI container)"

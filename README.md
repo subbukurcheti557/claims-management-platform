@@ -5,7 +5,7 @@ them. Claims officers pick up, assess, approve, settle or reject claims. Manager
 workload in real time. One Angular application serves all three roles.
 
 **Stack:** Java 17 · Spring Boot 3.4 · Spring Cloud 2024 (Gateway, Eureka, Resilience4j) · Kafka · PostgreSQL 16 ·
-Angular 22 with Native Federation micro-frontends · Angular Material 3 · JWT · Maven · Docker Compose.
+Angular 22 single-page app (lazy-loaded claimant and staff areas) · Angular Material 3 · JWT · Maven · Docker Compose.
 
 | Document | What it covers |
 |---|---|
@@ -33,7 +33,7 @@ claims-management-platform/
 │       ├── policy-service/      policies, coverage, paid-to-date         :8082  policy_db
 │       ├── claims-service/      claim lifecycle, queue, dashboards       :8083  claims_db
 │       └── notification-service/ in-app notifications from events       :8084  notification_db
-├── frontend/                    Angular 22 workspace: shell, claimant, staff, shared   :4200 / :4201 / :4202
+├── frontend/                    Angular 22 single-page app: claimant + staff areas, shared   :4200
 ├── contracts/
 │   ├── openapi/                 exported OpenAPI spec of each service
 │   └── events/                  claims.lifecycle.v1.schema.json (the Kafka contract)
@@ -60,7 +60,7 @@ The first start takes about 1–2 minutes while the services register with Eurek
 
 | URL | What |
 |---|---|
-| http://localhost:4200 | The application (shell). Micro-frontends are served from :4201 (claimant) and :4202 (staff) |
+| http://localhost:4200 | The application |
 | http://localhost:8080 | API gateway (the only backend address the browser uses) |
 | http://localhost:8761 | Eureka dashboard |
 | http://localhost:8333 | Object storage for claim photos and documents (SeaweedFS, S3 API; files are only reachable through claims-service) |
@@ -91,14 +91,14 @@ Sixteen seeded claims cover every status and market, so the queue and dashboard 
 ```bash
 docker compose up -d postgres kafka discovery-server       # infrastructure only
 cd backend/services/claims-service && mvn spring-boot:run  # any service, defaults point at localhost
-cd frontend && npm ci && npm run start:all                 # shell :4200 + remotes :4201/:4202 with live reload
+cd frontend && npm ci && npm start                         # app on :4200 with live reload
 ```
 
 ---
 
 ## What it does
 
-**Claimant (claimant micro-frontend)**
+**Claimant (claimant area)**
 - Reports an incident in three steps: policy, what happened, estimated loss and review. Cover is checked straight away
   (inactive policy, incident outside the policy period, wrong product, someone else's policy).
 - Sees all their claims with a plain-language status, a progress tracker, the full history and the decision.
@@ -107,7 +107,7 @@ cd frontend && npm ci && npm run start:all                 # shell :4200 + remot
   WebP or PDF, up to 10 MB) until the claim is decided.
 - Withdraws a claim before it is assessed. Receives in-app notifications for every step that concerns them.
 
-**Claims officer (staff micro-frontend)**
+**Claims officer (staff area)**
 - Work queue with tabs (to pick up, mine, all open, search all), filters (market, priority, status, overdue, text),
   sorting, paging and SLA indicators. Picking up uses optimistic locking: if two officers click at once, one wins and
   the other is told. The queue and the manager dashboard refresh every 30 s and when the tab regains focus, and the

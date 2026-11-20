@@ -24,7 +24,7 @@ Single Angular application serves all user types.
 | AI collaboration process | 25 | `docs/AI_JOURNAL.md` kept from the first prompt; accepted / challenged / overridden entries |
 | Planning, architecture, design | 15 | This document, ADRs (§12), trade-offs stated explicitly |
 | Clean architecture | 15 | Layered-by-feature packages, domain state machine free of Spring, SOLID |
-| MFE architecture & components | 15 | Angular **Native Federation**: shell host + `claimant` + `staff` remotes + shared lib |
+| MFE architecture & components | 15 | Single Angular app with lazy-loaded `claimant` and `staff` areas + shared folder (MFEs replaced, ADR-014) |
 | Data & integration | 12 | DB-per-service, Flyway, transactional outbox → Kafka, idempotent consumers |
 | Service & API design | 10 | Intent-based command endpoints, RFC 7807 errors, OpenAPI per service |
 | Backend tests | 8 | Domain unit tests, `@WebMvcTest` + security, Testcontainers/Embedded Kafka integration |
@@ -40,14 +40,14 @@ Single Angular application serves all user types.
 ```mermaid
 flowchart LR
   subgraph Browser
-    SH[Shell host :4200<br/>login, layout, nav, theme,<br/>notifications bell]
-    CM[claimant-mfe :4201]
-    SM[staff-mfe :4202]
-    SH -- federation --> CM
-    SH -- federation --> SM
+    SH[Angular app :4200<br/>login, layout, nav, theme,<br/>notifications bell]
+    CM[claimant area<br/>lazy chunk]
+    SM[staff area<br/>lazy chunk]
+    SH -- lazy route --> CM
+    SH -- lazy route --> SM
   end
 
-  SH & CM & SM -->|REST + JWT| GW[API Gateway :8080<br/>Spring Cloud Gateway<br/>JWT validation, CORS, correlation-id]
+  SH -->|REST + JWT| GW[API Gateway :8080<br/>Spring Cloud Gateway<br/>JWT validation, CORS, correlation-id]
 
   GW -->|lb://| ID[identity-service :8081]
   GW -->|lb://| PS[policy-service :8082]
@@ -429,7 +429,7 @@ claims-management-platform/
 │       ├── policy-service/      policies, coverage, paid-to-date         :8082  policy_db
 │       ├── claims-service/      claim lifecycle, queue, dashboards       :8083  claims_db
 │       └── notification-service/ in-app notifications from events       :8084  notification_db
-├── frontend/                    Angular 22 workspace: shell, claimant, staff, shared   :4200 / :4201 / :4202
+├── frontend/                    Angular 22 single-page app: claimant + staff areas, shared   :4200
 ├── contracts/
 │   ├── openapi/                 exported OpenAPI spec of each service
 │   └── events/                  claims.lifecycle.v1.schema.json (the Kafka contract)
@@ -504,37 +504,34 @@ layer depends on ports, not Kafka/HTTP.
 
 ---
 
-## 10. Frontend design (Angular 22 + Native Federation v4)
+## 10. Frontend design (Angular 22 single-page application)
 
 ```
-frontend/projects/
-├── shell/      host (:4200): login, layout + role-based nav, notification bell (polling store), theme toggle,
-│               loads a remote per role from public/federation.manifest.json; fallback page if a remote is down
-├── claimant/   remote (:4201) exposes ./routes: My claims, Report an incident (3-step wizard, photos attached in the
-│               last step), Claim detail (progress tracker, decision banner, answer questions, photos and documents,
-│               withdraw, history)
-├── staff/      remote (:4202) exposes ./routes: Work queue (tabs, filters, paging, sorting, pick-up), Claim workspace
-│               (details, photos and documents, cover, questions, assessments, action panel, notes, history),
-│               Dashboard (exposure, workload)
-└── shared/     @icmp/shared — federation singleton: API types, typed API clients, AuthStore, auth interceptor,
+frontend/src/app/
+├── app.routes.ts  /login, /claimant/** and /staff/** (lazy, guarded by roleGuard), 404
+├── layout/ login/ notifications/ theme/ pages/
+│               app frame: login, layout + role-based nav, notification bell (polling store), theme toggle, 404 page
+├── claimant/   lazy area: My claims, Report an incident (3-step wizard, photos attached in the last step), Claim detail
+│               (progress tracker, decision banner, answer questions, photos and documents, withdraw, history)
+├── staff/      lazy area: Work queue (tabs, filters, paging, sorting, pick-up), Claim workspace (details, photos and
+│               documents, cover, questions, assessments, action panel, notes, history), Dashboard (exposure, workload)
+└── shared/     imported as @icmp/shared (tsconfig path): API types, typed API clients, AuthStore, auth interceptor,
                 role guards, problem-detail messages, status/priority chips, timeline, pipes, ClaimDocumentsComponent
-                (gallery, viewer, upload; images fetched as blobs with the token), design tokens (_theme.scss)
+                (gallery, viewer, upload; images fetched as blobs with the token). Design tokens: src/styles/_theme.scss
 ```
 
-* **Two user types, one codebase:** the shell reads the role from the session and lazy-loads only that user's remote
-  (`/claimant/**` or `/staff/**`, guarded by `roleGuard`). Each remote also runs on its own dev server.
-* **Shared singletons:** Angular, Material and `@icmp/shared` are shared as singletons, so the shell and the remotes use
-  one `AuthStore` instance (one login).
+* **Two user types, one codebase:** the router reads the role from the session and lazy-loads only that user's area
+  (`/claimant/**` or `/staff/**`, guarded by `roleGuard`). Each area is a separate chunk, downloaded on first use.
+* **One build, one server:** a single `ng serve` / `ng build` and one nginx site on :4200. Earlier versions used
+  Native Federation (shell + two remotes on :4201/:4202); ADR-014 records why it was replaced.
 * **State:** one signal store per feature, provided at page level (`MyClaimsStore`, `ClaimDetailStore`, `QueueStore`,
-  `WorkspaceStore`, `DashboardStore`, shell `NotificationStore`). Stores expose read-only signals and intent methods;
+  `WorkspaceStore`, `DashboardStore`, `NotificationStore`). Stores expose read-only signals and intent methods;
   pages bind to them; `ActionPanelComponent` is purely presentational (inputs and outputs only).
 * **Async UX:** after every command the store takes the server's response as the new state and refreshes the history.
   A 409 reloads the claim and tells the officer why. Notifications are polled every 30 s and when the tab regains focus.
 * **Theming and a11y:** Material 3 theme plus app tokens using CSS `light-dark()`; follows the OS with a 3-way toggle.
   Status is shown as icon plus text, never colour alone. There is a skip link, labelled fields and visible focus, and
   `role="alert"`/`role="status"` for async results.
-* **Federation config notes:** Material and CDK ship Node-only schematics, which must be excluded with `skip` in each
-  `federation.config.mjs`, or the shared bundle fails to build.
 
 ## 11. Assumptions
 
@@ -558,7 +555,7 @@ frontend/projects/
 |---|---|---|
 | 001 | 3 business services (claims, policy, notification) + identity | single monolith (doesn't show boundaries); splitting assessment from claims (one state machine → distributed TX) |
 | 002 | REST for queries/commands needing an answer; Kafka for lifecycle facts | Kafka request/reply for coverage (latency, complexity) |
-| 003 | Native Federation MFEs (shell + 2 remotes by user type) | one SPA with lazy modules (doesn't meet MFE rubric); Webpack Module Federation (Angular now esbuild-based) |
+| 003 | ~~Native Federation MFEs (shell + 2 remotes by user type)~~ superseded by ADR-014 | one SPA with lazy modules (doesn't meet MFE rubric); Webpack Module Federation (Angular now esbuild-based) |
 | 004 | Coverage check failure → refuse FNOL (503) | accept as "PENDING_VERIFICATION" (more states, better availability — noted as next step) |
 | 005 | HS256 JWT from own identity-service | Keycloak (heavier local setup); RS256/JWKS (next step) |
 | 006 | Code-first OpenAPI, specs exported to `contracts/openapi`; frontend types hand-written for now (generation is the next step) | contract-first (slower in a sprint) |
@@ -569,3 +566,4 @@ frontend/projects/
 | 011 | Integration tests on real PostgreSQL (Testcontainers) and embedded Kafka | H2 (would hide PostgreSQL-specific SQL such as `jsonb`, sequences, partial indexes) |
 | 012 | Same policy + incident date: refuse (409) while a claim is open, flag for review once one is paid; cap approvals across all claims on the policy, under a per-policy advisory lock | hard block on any second claim that day (a car can be hit twice); unique DB constraint (cannot express "open only" plus the paid-claim flag); trusting policy-service paid-to-date at approval (updated asynchronously, so too late) |
 | 013 | Photos and documents: bytes in S3-compatible object storage, metadata + SHA-256 in claims_db, uploads and downloads proxied through claims-service with the claim's access rules; file type from magic bytes; a damage photo is required before approval | bytes in PostgreSQL `bytea` (bloats backups and the DB); presigned URLs straight to the store (signatures bind the host name, so the browser and the containers would need the same store address; access rules would move into URL expiry; next step at scale); a separate document-service (the approval rule needs the documents in the claim's transaction); MinIO locally (no longer publishes container images, so SeaweedFS) |
+| 014 | One Angular SPA with lazy-loaded claimant and staff areas (replaces ADR-003, developer decision) | keeping Native Federation: three dev servers and builds, a manifest of remote URLs, federation build quirks, and harder step-through debugging, for two areas owned by one team and released together |
